@@ -205,6 +205,18 @@ def test_process_transitions_emits_expected_events() -> None:
         "azure_devops_pr_build_failed",
         "azure_devops_pr_ready_to_complete",
     ]
+    new_comment_payload = events[0][1]
+    assert new_comment_payload["pull_request_id"] == 77
+    assert new_comment_payload["author_name"] == "Reviewer"
+    assert new_comment_payload["text"] == "Looks good after the fix"
+    assert new_comment_payload["repository_name"] == "Repo"
+
+    build_failed_payload = events[1][1]
+    assert build_failed_payload["policies"][0]["display_name"] == "Build policy"
+
+    ready_payload = events[2][1]
+    assert ready_payload["source_ref_name"] == "refs/heads/feature"
+    assert ready_payload["target_ref_name"] == "refs/heads/main"
     assert coordinator.store.saved is not None
     assert coordinator._seen_state["pr_build_failed"]["77"] is True
     assert coordinator._seen_state["pr_ready"]["77"] is True

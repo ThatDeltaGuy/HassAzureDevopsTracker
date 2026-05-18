@@ -148,6 +148,12 @@ def _install_homeassistant_stubs() -> None:
         def available(self):
             return True
 
+        async def async_added_to_hass(self):
+            return None
+
+        async def async_will_remove_from_hass(self):
+            return None
+
     class UpdateFailed(Exception):
         """Minimal update exception stub."""
 
@@ -192,13 +198,28 @@ def _install_homeassistant_stubs() -> None:
         DROPDOWN = "dropdown"
 
     class SensorEntity:
-        pass
+        def async_write_ha_state(self):
+            return None
 
     class BinarySensorEntity:
-        pass
+        def async_write_ha_state(self):
+            return None
 
     class EventEntity:
-        pass
+        def __init__(self):
+            self._last_event = None
+
+        async def async_added_to_hass(self):
+            return None
+
+        async def async_will_remove_from_hass(self):
+            return None
+
+        def _trigger_event(self, event_type, payload=None):
+            self._last_event = (event_type, payload)
+
+        def async_write_ha_state(self):
+            return None
 
     entity_platform.AddConfigEntryEntitiesCallback = object
     typing_mod.StateType = object
