@@ -85,16 +85,40 @@ class AzureDevOpsClient:
 
     async def get_current_user(self) -> IdentityInfo:
         """Return the signed-in profile."""
-        data = await self._request_json(
-            "GET",
-            f"{PROFILE_URL}/_apis/profile/profiles/me",
-            params={"api-version": API_VERSION_PROFILE, "details": "true"},
-        )
-        return IdentityInfo(
-            id=data.get("id"),
-            display_name=data.get("displayName"),
-            unique_name=data.get("emailAddress"),
-        )
+        try:
+            data = await self._request_json(
+                "GET",
+                f"{PROFILE_URL}/_apis/profile/profiles/me",
+                params={"api-version": API_VERSION_PROFILE, "details": "true"},
+            )
+            return IdentityInfo(
+                id=data.get("id"),
+                display_name=data.get("displayName"),
+                unique_name=data.get("emailAddress"),
+            )
+        except AzureDevOpsAuthError:
+            # Some PATs work for project-scoped APIs but not the profile host.
+            # Fall back to connection data on dev.azure.com so the integration
+            # can still load instead of failing the whole config entry.
+            data = await self._request_json(
+                "GET",
+                f"{BASE_URL}/_apis/connectionData",
+                params={
+                    "api-version": API_VERSION_CORE,
+                    "connectOptions": "1",
+                    "lastChangeId": "-1",
+                    "lastChangeId64": "-1",
+                },
+            )
+            authenticated_user = data.get("authenticatedUser") or {}
+            return IdentityInfo(
+                id=authenticated_user.get("id") or authenticated_user.get("descriptor"),
+                display_name=authenticated_user.get("providerDisplayName")
+                or authenticated_user.get("customDisplayName")
+                or authenticated_user.get("displayName"),
+                unique_name=authenticated_user.get("uniqueName")
+                or authenticated_user.get("subjectDescriptor"),
+            )
 
     async def list_projects(self, organization: str) -> list[ProjectInfo]:
         """Return visible projects for an organization."""
