@@ -1,0 +1,2 @@
+# Azure DevOps Tracker does not expose custom services yet.
+# Events are emitted on the Home Assistant event bus instead.

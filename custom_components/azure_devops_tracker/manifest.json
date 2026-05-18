@@ -1,0 +1,12 @@
+{
+  "domain": "azure_devops_tracker",
+  "name": "Azure DevOps Tracker",
+  "codeowners": ["@alexlund"],
+  "config_flow": true,
+  "documentation": "https://github.com/alexlund/Azure-Devops-Integration",
+  "issue_tracker": "https://github.com/alexlund/Azure-Devops-Integration/issues",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "loggers": ["custom_components.azure_devops_tracker"],
+  "version": "0.1.0"
+}

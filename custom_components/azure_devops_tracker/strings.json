@@ -1,0 +1,51 @@
+{
+  "title": "Azure DevOps Tracker",
+  "config": {
+    "abort": {
+      "already_configured": "This Azure DevOps project is already configured."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Azure DevOps.",
+      "invalid_auth": "The PAT or organization is invalid.",
+      "no_projects": "No visible projects were returned for this organization."
+    },
+    "step": {
+      "user": {
+        "title": "Connect to Azure DevOps",
+        "description": "Enter your Azure DevOps organization and PAT. The next step loads your projects into a dropdown.",
+        "data": {
+          "organization": "Organization",
+          "personal_access_token": "Personal access token"
+        }
+      },
+      "project": {
+        "title": "Choose project and features",
+        "description": "Pick the Azure DevOps project to monitor and enable the data domains you want Home Assistant to load.",
+        "data": {
+          "project_id": "Project",
+          "enable_builds": "Enable pipelines and builds",
+          "enable_work_items": "Enable work items",
+          "enable_pull_requests": "Enable pull requests",
+          "enable_pull_request_comments": "Enable pull request comments",
+          "enable_pr_policies": "Enable PR policy status",
+          "scan_interval_seconds": "Polling interval in seconds"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Azure DevOps Tracker options",
+        "data": {
+          "enable_builds": "Enable pipelines and builds",
+          "enable_work_items": "Enable work items",
+          "enable_pull_requests": "Enable pull requests",
+          "enable_pull_request_comments": "Enable pull request comments",
+          "enable_pr_policies": "Enable PR policy status",
+          "scan_interval_seconds": "Polling interval in seconds"
+        }
+      }
+    }
+  }
+}
