@@ -58,12 +58,34 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._pat: str | None = None
         self._projects: list[ProjectInfo] = []
 
+    def _get_project(self, project_id: str) -> ProjectInfo | None:
+        """Return a configured project by id."""
+        for project in self._projects:
+            if project.id == project_id:
+                return project
+        return None
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Step 1: PAT and organization."""
         errors: dict[str, str] = {}
         if user_input is not None:
             self._organization = user_input[CONF_ORGANIZATION].strip()
             self._pat = user_input[CONF_PAT].strip()
+
+            if not self._organization or not self._pat:
+                errors["base"] = "required_field"
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=vol.Schema(
+                        {
+                            vol.Required(CONF_ORGANIZATION, default=self._organization or ""): TextSelector(),
+                            vol.Required(CONF_PAT): TextSelector(
+                                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                            ),
+                        }
+                    ),
+                    errors=errors,
+                )
 
             client = AzureDevOpsClient(async_get_clientsession(self.hass), self._pat)
             try:
@@ -95,28 +117,35 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_project(self, user_input: dict[str, Any] | None = None):
         """Step 2: project selection and feature toggles."""
+        errors: dict[str, str] = {}
         if user_input is not None:
             project_id = user_input[CONF_PROJECT_ID]
-            project = next(project for project in self._projects if project.id == project_id)
-            await self.async_set_unique_id(f"{self._organization}_{project.id}")
-            self._abort_if_unique_id_configured()
-            return self.async_create_entry(
-                title=f"{self._organization}/{project.name}",
-                data={
-                    CONF_ORGANIZATION: self._organization,
-                    CONF_PROJECT_ID: project.id,
-                    CONF_PROJECT_NAME: project.name,
-                    CONF_PAT: self._pat,
-                },
-                options={
-                    OPTION_ENABLE_BUILDS: user_input[OPTION_ENABLE_BUILDS],
-                    OPTION_ENABLE_WORK_ITEMS: user_input[OPTION_ENABLE_WORK_ITEMS],
-                    OPTION_ENABLE_PULL_REQUESTS: user_input[OPTION_ENABLE_PULL_REQUESTS],
-                    OPTION_ENABLE_PULL_REQUEST_COMMENTS: user_input[OPTION_ENABLE_PULL_REQUEST_COMMENTS],
-                    OPTION_ENABLE_PR_POLICIES: user_input[OPTION_ENABLE_PR_POLICIES],
-                    OPTION_SCAN_INTERVAL: user_input[OPTION_SCAN_INTERVAL],
-                },
-            )
+            project = self._get_project(project_id)
+            if project is None:
+                errors["base"] = "project_not_found"
+            else:
+                await self.async_set_unique_id(f"{self._organization}_{project.id}")
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title=f"{self._organization}/{project.name}",
+                    data={
+                        CONF_ORGANIZATION: self._organization,
+                        CONF_PROJECT_ID: project.id,
+                        CONF_PROJECT_NAME: project.name,
+                        CONF_PAT: self._pat,
+                    },
+                    options={
+                        OPTION_ENABLE_BUILDS: user_input[OPTION_ENABLE_BUILDS],
+                        OPTION_ENABLE_WORK_ITEMS: user_input[OPTION_ENABLE_WORK_ITEMS],
+                        OPTION_ENABLE_PULL_REQUESTS: user_input[OPTION_ENABLE_PULL_REQUESTS],
+                        OPTION_ENABLE_PULL_REQUEST_COMMENTS: user_input[OPTION_ENABLE_PULL_REQUEST_COMMENTS],
+                        OPTION_ENABLE_PR_POLICIES: user_input[OPTION_ENABLE_PR_POLICIES],
+                        OPTION_SCAN_INTERVAL: min(
+                            MAX_SCAN_INTERVAL_SECONDS,
+                            max(MIN_SCAN_INTERVAL_SECONDS, int(user_input[OPTION_SCAN_INTERVAL])),
+                        ),
+                    },
+                )
 
         project_options = [
             {"value": project.id, "label": project.name}
@@ -147,6 +176,7 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                 }
             ),
+            errors=errors,
         )
 
     @staticmethod

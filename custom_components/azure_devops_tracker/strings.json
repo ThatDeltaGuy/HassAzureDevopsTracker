@@ -7,7 +7,9 @@
     "error": {
       "cannot_connect": "Failed to connect to Azure DevOps.",
       "invalid_auth": "The PAT or organization is invalid.",
-      "no_projects": "No visible projects were returned for this organization."
+      "no_projects": "No visible projects were returned for this organization.",
+      "project_not_found": "The selected project is no longer available. Please choose it again.",
+      "required_field": "Organization and personal access token are required."
     },
     "step": {
       "user": {

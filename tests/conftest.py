@@ -23,6 +23,36 @@ def _install_homeassistant_stubs() -> None:
 
     config_entries.ConfigEntry = ConfigEntry
 
+    class ConfigFlow:
+        """Minimal ConfigFlow stub."""
+
+        def __init_subclass__(cls, **kwargs):
+            return super().__init_subclass__()
+
+        def async_show_form(self, **kwargs):
+            return {"type": "form", **kwargs}
+
+        def async_create_entry(self, *, title, data, options=None):
+            return {"type": "create_entry", "title": title, "data": data, "options": options or {}}
+
+        async def async_set_unique_id(self, unique_id):
+            self._test_unique_id = unique_id
+
+        def _abort_if_unique_id_configured(self):
+            return None
+
+    class OptionsFlow:
+        """Minimal OptionsFlow stub."""
+
+        def async_show_form(self, **kwargs):
+            return {"type": "form", **kwargs}
+
+        def async_create_entry(self, *, title, data):
+            return {"type": "create_entry", "title": title, "data": data}
+
+    config_entries.ConfigFlow = ConfigFlow
+    config_entries.OptionsFlow = OptionsFlow
+
     core = types.ModuleType("homeassistant.core")
 
     class HomeAssistant:
@@ -52,8 +82,15 @@ def _install_homeassistant_stubs() -> None:
 
     helpers = types.ModuleType("homeassistant.helpers")
     aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
+    device_registry = types.ModuleType("homeassistant.helpers.device_registry")
+    entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
+    selector = types.ModuleType("homeassistant.helpers.selector")
     storage = types.ModuleType("homeassistant.helpers.storage")
+    typing_mod = types.ModuleType("homeassistant.helpers.typing")
     update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
+    sensor_mod = types.ModuleType("homeassistant.components.sensor")
+    binary_sensor_mod = types.ModuleType("homeassistant.components.binary_sensor")
+    event_mod = types.ModuleType("homeassistant.components.event")
 
     def async_get_clientsession(_hass):
         return None
@@ -97,15 +134,97 @@ def _install_homeassistant_stubs() -> None:
 
             return remove_listener
 
+    class CoordinatorEntity:
+        """Minimal coordinator entity stub."""
+
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+
+        def __init__(self, coordinator):
+            self.coordinator = coordinator
+
+        @property
+        def available(self):
+            return True
+
     class UpdateFailed(Exception):
         """Minimal update exception stub."""
 
+    class DeviceEntryType:
+        SERVICE = "service"
+
+    class DeviceInfo(dict):
+        """Minimal DeviceInfo stub."""
+
+    class _SelectorBase:
+        def __init__(self, config=None):
+            self.config = config
+
+    class TextSelector(_SelectorBase):
+        pass
+
+    class TextSelectorConfig:
+        def __init__(self, *, type=None):
+            self.type = type
+
+    class TextSelectorType:
+        PASSWORD = "password"
+
+    class BooleanSelector(_SelectorBase):
+        pass
+
+    class NumberSelector(_SelectorBase):
+        pass
+
+    class NumberSelectorConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class SelectSelector(_SelectorBase):
+        pass
+
+    class SelectSelectorConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class SelectSelectorMode:
+        DROPDOWN = "dropdown"
+
+    class SensorEntity:
+        pass
+
+    class BinarySensorEntity:
+        pass
+
+    class EventEntity:
+        pass
+
+    entity_platform.AddConfigEntryEntitiesCallback = object
+    typing_mod.StateType = object
+
     aiohttp_client.async_get_clientsession = async_get_clientsession
+    device_registry.DeviceEntryType = DeviceEntryType
+    device_registry.DeviceInfo = DeviceInfo
+    selector.BooleanSelector = BooleanSelector
+    selector.NumberSelector = NumberSelector
+    selector.NumberSelectorConfig = NumberSelectorConfig
+    selector.SelectSelector = SelectSelector
+    selector.SelectSelectorConfig = SelectSelectorConfig
+    selector.SelectSelectorMode = SelectSelectorMode
+    selector.TextSelector = TextSelector
+    selector.TextSelectorConfig = TextSelectorConfig
+    selector.TextSelectorType = TextSelectorType
     storage.Store = Store
+    update_coordinator.CoordinatorEntity = CoordinatorEntity
     update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
     update_coordinator.UpdateFailed = UpdateFailed
+    sensor_mod.SensorEntity = SensorEntity
+    binary_sensor_mod.BinarySensorEntity = BinarySensorEntity
+    event_mod.EventEntity = EventEntity
 
     homeassistant.config_entries = config_entries
+    homeassistant.components = types.ModuleType("homeassistant.components")
     homeassistant.core = core
     homeassistant.exceptions = exceptions
     homeassistant.const = const
@@ -113,12 +232,20 @@ def _install_homeassistant_stubs() -> None:
 
     sys.modules["homeassistant"] = homeassistant
     sys.modules["homeassistant.config_entries"] = config_entries
+    sys.modules["homeassistant.components"] = homeassistant.components
+    sys.modules["homeassistant.components.sensor"] = sensor_mod
+    sys.modules["homeassistant.components.binary_sensor"] = binary_sensor_mod
+    sys.modules["homeassistant.components.event"] = event_mod
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.exceptions"] = exceptions
     sys.modules["homeassistant.const"] = const
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
+    sys.modules["homeassistant.helpers.device_registry"] = device_registry
+    sys.modules["homeassistant.helpers.entity_platform"] = entity_platform
+    sys.modules["homeassistant.helpers.selector"] = selector
     sys.modules["homeassistant.helpers.storage"] = storage
+    sys.modules["homeassistant.helpers.typing"] = typing_mod
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
 
 
