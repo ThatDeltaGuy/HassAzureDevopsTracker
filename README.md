@@ -2,6 +2,33 @@
 
 `Azure DevOps Tracker` is a HACS custom integration for Home Assistant that monitors a single Azure DevOps project per config entry.
 
+## Install With HACS
+
+1. In Home Assistant, open `HACS`.
+2. Open the menu in the top-right and choose `Custom repositories`.
+3. Paste the GitHub repository URL for this project.
+4. Set the category to `Integration`.
+5. Add the repository.
+6. Open the repository inside HACS and click `Download`.
+7. Restart Home Assistant after the download completes.
+
+## Add The Integration
+
+1. In Home Assistant, go to `Settings` -> `Devices & Services`.
+2. Click `Add Integration`.
+3. Search for `Azure DevOps Tracker`.
+4. Enter your Azure DevOps organization and PAT.
+5. Choose the project from the dropdown.
+6. Enable or disable the feature areas you want.
+7. Finish setup and let the first refresh complete.
+
+## Update With HACS
+
+- Open `HACS` -> `Integrations`.
+- Open `Azure DevOps Tracker`.
+- Install the latest version when updates are available.
+- Restart Home Assistant after updating.
+
 Current v0.1 scaffold includes:
 
 - PAT + organization setup flow
@@ -71,12 +98,12 @@ Per-PR entities for each tracked PR:
 - binary sensor: `PR <id> build failed`
 - binary sensor: `PR <id> ready to complete`
 
-The per-PR entities are created dynamically for PRs that match the current scope: created by you or where you are a reviewer.
+The per-PR entities are created dynamically for PRs that match the current scope: created by the authenticated user or where the authenticated user is a reviewer.
 
 ## Notes
 
 - This first pass is intentionally project-scoped and aggregate-focused.
-- It tracks PRs created by you or where you are a reviewer.
+- It tracks PRs created by the authenticated user or where the authenticated user is a reviewer.
 - Existing comments are marked as seen on first load to avoid a notification storm.
 
 ## Remaining Work
