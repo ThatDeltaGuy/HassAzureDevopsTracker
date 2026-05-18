@@ -167,6 +167,15 @@ def _install_homeassistant_stubs() -> None:
         def __init__(self, config=None):
             self.config = config
 
+        def __call__(self, value):
+            return value
+
+        def __voluptuous_compile__(self, _schema):
+            def validate(_path, value):
+                return value
+
+            return validate
+
     class TextSelector(_SelectorBase):
         pass
 
@@ -198,16 +207,28 @@ def _install_homeassistant_stubs() -> None:
         DROPDOWN = "dropdown"
 
     class SensorEntity:
+        @property
+        def name(self):
+            return getattr(self, "_attr_name", None)
+
         def async_write_ha_state(self):
             return None
 
     class BinarySensorEntity:
+        @property
+        def name(self):
+            return getattr(self, "_attr_name", None)
+
         def async_write_ha_state(self):
             return None
 
     class EventEntity:
         def __init__(self):
             self._last_event = None
+
+        @property
+        def name(self):
+            return getattr(self, "_attr_name", None)
 
         async def async_added_to_hass(self):
             return None

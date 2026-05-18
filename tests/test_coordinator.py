@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from custom_components.azure_devops_tracker.const import HUMAN_COMMENT_TYPE
 from custom_components.azure_devops_tracker.coordinator import AzureDevOpsCoordinator
-from custom_components.azure_devops_tracker.models import CommentInfo, CoordinatorData, IdentityInfo, ProjectInfo, PullRequestInfo
+from custom_components.azure_devops_tracker.models import CommentInfo, CoordinatorData, IdentityInfo, PolicyInfo, ProjectInfo, PullRequestInfo
 
 
 class _FakeStore:
@@ -61,6 +61,14 @@ def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bo
         unseen_comment_count=unseen_count,
         build_failed=build_failed,
         ready_to_complete=ready,
+        policies=[
+            PolicyInfo(
+                evaluation_id="eval-1",
+                display_name="Build policy",
+                status="rejected" if build_failed else "approved",
+                is_blocking=True,
+            )
+        ],
     )
 
 
