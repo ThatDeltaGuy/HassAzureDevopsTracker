@@ -58,10 +58,33 @@ custom_components/azure_devops_tracker/
 
 ## Recommended PAT Scopes
 
-- `vso.profile`
-- `vso.code`
-- `vso.build`
-- `vso.work`
+- `Profile: Read` (`vso.profile`)
+- `Code: Read` (`vso.code`)
+- `Build: Read` (`vso.build`)
+- `Work Items: Read` (`vso.work`)
+
+These cover the current feature set:
+
+- `Profile: Read`
+  - used to identify the authenticated user for "my PRs" filtering
+- `Code: Read`
+  - used for pull requests, reviewers, repositories, and PR comment threads
+- `Build: Read`
+  - used for pipelines and builds
+- `Work Items: Read`
+  - used for work item queries and work item details
+
+If only part of the integration is being used, the PAT can be reduced:
+
+- PRs and PR comments only:
+  - `Profile: Read`
+  - `Code: Read`
+- builds only:
+  - `Build: Read`
+- work items only:
+  - `Work Items: Read`
+
+For most installs, the safest practical approach is to create a dedicated PAT for Home Assistant with only the four read scopes above.
 
 ## Comment Attributes
 

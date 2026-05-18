@@ -31,14 +31,14 @@ class AzureDevOpsTrackerOptionsFlow(OptionsFlow):
     """Manage Azure DevOps Tracker options."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Handle the options flow."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        options = self.config_entry.options
+        options = self._config_entry.options
         schema = vol.Schema(
             {
                 vol.Required(
