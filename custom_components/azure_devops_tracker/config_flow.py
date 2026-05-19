@@ -48,7 +48,6 @@ from .options_flow import AzureDevOpsTrackerOptionsFlow
 
 CONF_EXISTING_ORGANIZATION = "existing_organization"
 CONF_REUSE_PERSONAL_ACCESS_TOKEN = "reuse_personal_access_token"
-PAT_REUSE_SENTINEL = "123456789abcdefghijklmnopqrstuvwxyz"
 
 
 class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -100,16 +99,9 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         return None
 
     def _user_step_schema(self) -> vol.Schema:
-        """Build the first-step schema, including reuse options when available."""
-        existing_entries = self._existing_entries()
+        """Build the organization selection schema."""
         existing_organizations = self._existing_organizations()
         schema: dict[Any, Any] = {}
-
-        selected_organization_context = (
-            self._organization_input or self._selected_existing_organization or None
-        )
-
-        filtered_entries = self._entries_for_organization(selected_organization_context)
 
         if existing_organizations:
             schema[
@@ -134,41 +126,39 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_ORGANIZATION, default=self._organization_input)
         ] = TextSelector()
 
-        if existing_entries:
-            selected_reuse_entry = self._get_reuse_entry(self._selected_reuse_entry)
-            if (
-                selected_reuse_entry is not None
-                and selected_reuse_entry not in filtered_entries
-            ):
-                self._selected_reuse_entry = ""
+        return vol.Schema(schema)
 
-            schema[
-                vol.Optional(
-                    CONF_REUSE_PERSONAL_ACCESS_TOKEN,
-                    default=self._selected_reuse_entry or "",
-                )
-            ] = SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        {"value": "", "label": ""},
-                    ]
-                    + [
-                        {"value": entry.entry_id, "label": entry.title}
-                        for entry in filtered_entries
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
+    def _credentials_step_schema(self) -> vol.Schema:
+        """Build the PAT selection schema for the chosen organization."""
+        filtered_entries = self._entries_for_organization(self._organization)
+        selected_reuse_entry = self._get_reuse_entry(self._selected_reuse_entry)
+        if (
+            selected_reuse_entry is not None
+            and selected_reuse_entry not in filtered_entries
+        ):
+            self._selected_reuse_entry = ""
+
+        schema: dict[Any, Any] = {}
+        schema[
+            vol.Optional(
+                CONF_REUSE_PERSONAL_ACCESS_TOKEN,
+                default=self._selected_reuse_entry or "",
             )
-
-        if existing_entries:
-            schema[
-                vol.Optional(CONF_PAT, default=self._pat_input)
-            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
-        else:
-            schema[
-                vol.Required(CONF_PAT, default=self._pat_input)
-            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
-
+        ] = SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    {"value": "", "label": ""},
+                ]
+                + [
+                    {"value": entry.entry_id, "label": entry.title}
+                    for entry in filtered_entries
+                ],
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
+        schema[
+            vol.Optional(CONF_PAT, default=self._pat_input)
+        ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
         return vol.Schema(schema)
 
     def _get_project(self, project_id: str) -> ProjectInfo | None:
@@ -179,51 +169,41 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         return None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Step 1: PAT and organization."""
+        """Step 1: organization selection."""
         errors: dict[str, str] = {}
         if user_input is not None:
             selected_organization = user_input.get(CONF_EXISTING_ORGANIZATION, "").strip()
-            selected_reuse_entry = user_input.get(CONF_REUSE_PERSONAL_ACCESS_TOKEN, "").strip()
             entered_organization = user_input.get(CONF_ORGANIZATION, "").strip()
-            entered_pat_raw = user_input.get(CONF_PAT, "").strip()
-
-            organization_selection_changed = (
-                selected_organization != self._selected_existing_organization
-            )
-            reuse_selection_changed = selected_reuse_entry != self._selected_reuse_entry
-
-            if organization_selection_changed and not entered_organization:
-                self._selected_existing_organization = selected_organization
-                self._organization_input = selected_organization
-                self._organization = selected_organization or None
-                self._selected_reuse_entry = ""
-                self._pat_input = ""
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=self._user_step_schema(),
-                    errors=errors,
-                )
-
-            if reuse_selection_changed and not entered_pat_raw:
-                self._selected_existing_organization = selected_organization
-                self._organization_input = entered_organization or selected_organization or ""
-                self._organization = self._organization_input or None
-                self._selected_reuse_entry = selected_reuse_entry
-                self._pat_input = PAT_REUSE_SENTINEL if selected_reuse_entry else ""
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=self._user_step_schema(),
-                    errors=errors,
-                )
-
-            if not entered_organization and not selected_organization:
-                selected_reuse_entry = ""
-                self._pat_input = ""
 
             self._selected_existing_organization = selected_organization
             self._organization_input = entered_organization or selected_organization or ""
             self._organization = entered_organization or selected_organization or None
 
+            self._selected_reuse_entry = ""
+            self._pat_input = ""
+            self._pat = None
+
+            if not self._organization:
+                errors["base"] = "required_field"
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._user_step_schema(),
+                    errors=errors,
+                )
+
+            return await self.async_step_credentials()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=self._user_step_schema(),
+            errors=errors,
+        )
+
+    async def async_step_credentials(self, user_input: dict[str, Any] | None = None):
+        """Step 2: PAT selection or reuse."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            selected_reuse_entry = user_input.get(CONF_REUSE_PERSONAL_ACCESS_TOKEN, "").strip()
             valid_reuse_entries = self._entries_for_organization(self._organization)
             if selected_reuse_entry and not any(
                 entry.entry_id == selected_reuse_entry for entry in valid_reuse_entries
@@ -232,24 +212,17 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
 
             self._selected_reuse_entry = selected_reuse_entry
             reuse_entry = self._get_reuse_entry(selected_reuse_entry)
-            entered_pat = entered_pat_raw
-            if entered_pat == PAT_REUSE_SENTINEL:
-                entered_pat = ""
-            if not selected_reuse_entry:
-                self._pat_input = entered_pat
-            elif not entered_pat:
-                self._pat_input = ""
-            else:
-                self._pat_input = entered_pat
+            entered_pat = user_input.get(CONF_PAT, "").strip()
+            self._pat_input = entered_pat
             self._pat = entered_pat or (
                 reuse_entry.data.get(CONF_PAT) if reuse_entry is not None else None
             )
 
-            if not self._organization or not self._pat:
+            if not self._pat:
                 errors["base"] = "required_field"
                 return self.async_show_form(
-                    step_id="user",
-                    data_schema=self._user_step_schema(),
+                    step_id="credentials",
+                    data_schema=self._credentials_step_schema(),
                     errors=errors,
                 )
 
@@ -269,13 +242,13 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_project()
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=self._user_step_schema(),
+            step_id="credentials",
+            data_schema=self._credentials_step_schema(),
             errors=errors,
         )
 
     async def async_step_project(self, user_input: dict[str, Any] | None = None):
-        """Step 2: project selection and feature toggles."""
+        """Step 3: project selection and feature toggles."""
         errors: dict[str, str] = {}
         if user_input is not None:
             project_id = user_input[CONF_PROJECT_ID]
