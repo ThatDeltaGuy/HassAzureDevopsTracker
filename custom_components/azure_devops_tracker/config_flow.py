@@ -47,7 +47,7 @@ from .models import ProjectInfo
 from .options_flow import AzureDevOpsTrackerOptionsFlow
 
 CONF_EXISTING_ORGANIZATION = "existing_organization"
-CONF_REUSE_ENTRY = "reuse_entry"
+CONF_REUSE_PERSONAL_ACCESS_TOKEN = "reuse_personal_access_token"
 PAT_REUSE_SENTINEL = "123456789abcdefghijklmnopqrstuvwxyz"
 
 
@@ -61,6 +61,10 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._organization: str | None = None
         self._pat: str | None = None
         self._projects: list[ProjectInfo] = []
+        self._organization_input: str = ""
+        self._selected_existing_organization: str = ""
+        self._selected_reuse_entry: str = ""
+        self._pat_input: str = ""
 
     def _existing_entries(self):
         """Return existing integration entries."""
@@ -74,6 +78,17 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             if entry.data.get(CONF_ORGANIZATION)
         }
         return sorted(organizations)
+
+    def _entries_for_organization(self, organization: str | None) -> list[Any]:
+        """Return existing entries matching the provided organization."""
+        if not organization:
+            return []
+        normalized = organization.casefold()
+        return [
+            entry
+            for entry in self._existing_entries()
+            if (entry.data.get(CONF_ORGANIZATION) or "").casefold() == normalized
+        ]
 
     def _get_reuse_entry(self, entry_id: str | None):
         """Return an existing entry selected for reuse."""
@@ -90,9 +105,22 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         existing_organizations = self._existing_organizations()
         schema: dict[Any, Any] = {}
 
+        schema[
+            vol.Required(CONF_ORGANIZATION, default=self._organization_input)
+        ] = TextSelector()
+
+        selected_organization_context = (
+            self._organization_input or self._selected_existing_organization or None
+        )
+
+        filtered_entries = self._entries_for_organization(selected_organization_context)
+
         if existing_organizations:
             schema[
-                vol.Optional(CONF_EXISTING_ORGANIZATION)
+                vol.Optional(
+                    CONF_EXISTING_ORGANIZATION,
+                    default=self._selected_existing_organization or "",
+                )
             ] = SelectSelector(
                 SelectSelectorConfig(
                     options=[
@@ -104,33 +132,35 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         if existing_entries:
+            selected_reuse_entry = self._get_reuse_entry(self._selected_reuse_entry)
+            if (
+                selected_reuse_entry is not None
+                and selected_reuse_entry not in filtered_entries
+            ):
+                self._selected_reuse_entry = ""
+
             schema[
-                vol.Optional(CONF_REUSE_ENTRY)
+                vol.Optional(
+                    CONF_REUSE_PERSONAL_ACCESS_TOKEN,
+                    default=self._selected_reuse_entry or "",
+                )
             ] = SelectSelector(
                 SelectSelectorConfig(
                     options=[
                         {"value": entry.entry_id, "label": entry.title}
-                        for entry in existing_entries
+                        for entry in filtered_entries
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             )
 
-        default_organization = self._organization
-        if default_organization is None and existing_entries:
-            default_organization = existing_entries[0].data.get(CONF_ORGANIZATION, "")
-
-        schema[
-            vol.Required(CONF_ORGANIZATION, default=default_organization or "")
-        ] = TextSelector()
-
         if existing_entries:
             schema[
-                vol.Optional(CONF_PAT, default=PAT_REUSE_SENTINEL)
+                vol.Optional(CONF_PAT, default=self._pat_input)
             ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
         else:
             schema[
-                vol.Required(CONF_PAT)
+                vol.Required(CONF_PAT, default=self._pat_input)
             ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
         return vol.Schema(schema)
@@ -147,12 +177,34 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             selected_organization = user_input.get(CONF_EXISTING_ORGANIZATION, "").strip()
-            reuse_entry = self._get_reuse_entry(user_input.get(CONF_REUSE_ENTRY))
+            selected_reuse_entry = user_input.get(CONF_REUSE_PERSONAL_ACCESS_TOKEN, "").strip()
             entered_organization = user_input.get(CONF_ORGANIZATION, "").strip()
+
+            if not entered_organization and not selected_organization:
+                selected_reuse_entry = ""
+                self._pat_input = ""
+
+            self._selected_existing_organization = selected_organization
+            self._organization_input = entered_organization or selected_organization or ""
             self._organization = entered_organization or selected_organization or None
+
+            valid_reuse_entries = self._entries_for_organization(self._organization)
+            if selected_reuse_entry and not any(
+                entry.entry_id == selected_reuse_entry for entry in valid_reuse_entries
+            ):
+                selected_reuse_entry = ""
+
+            self._selected_reuse_entry = selected_reuse_entry
+            reuse_entry = self._get_reuse_entry(selected_reuse_entry)
             entered_pat = user_input.get(CONF_PAT, "").strip()
             if entered_pat == PAT_REUSE_SENTINEL:
                 entered_pat = ""
+            if not selected_reuse_entry:
+                self._pat_input = entered_pat
+            elif not entered_pat:
+                self._pat_input = ""
+            else:
+                self._pat_input = entered_pat
             self._pat = entered_pat or (
                 reuse_entry.data.get(CONF_PAT) if reuse_entry is not None else None
             )

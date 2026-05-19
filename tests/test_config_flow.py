@@ -154,7 +154,7 @@ def test_user_step_reuses_pat_from_existing_entry(monkeypatch) -> None:
             {
                 CONF_ORGANIZATION: "org-one",
                 CONF_PAT: config_flow_module.PAT_REUSE_SENTINEL,
-                config_flow_module.CONF_REUSE_ENTRY: "entry-1",
+                config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN: "entry-1",
             }
         )
     )
@@ -164,8 +164,8 @@ def test_user_step_reuses_pat_from_existing_entry(monkeypatch) -> None:
     assert flow._pat == "existing-pat"
 
 
-def test_user_step_defaults_organization_from_existing_entry() -> None:
-    """The first existing entry organization is used as the default value."""
+def test_user_step_does_not_prefill_organization_from_existing_entry() -> None:
+    """Existing organizations should not prefill the organization text field automatically."""
     existing_entry = SimpleNamespace(
         entry_id="entry-1",
         title="org-one/Project One",
@@ -181,7 +181,7 @@ def test_user_step_defaults_organization_from_existing_entry() -> None:
     organization_key = next(
         key for key in result["data_schema"].schema if getattr(key, "schema", None) == CONF_ORGANIZATION
     )
-    assert organization_key.default() == "org-one"
+    assert organization_key.default() == ""
 
 
 def test_user_step_uses_existing_organization_when_text_input_blank(monkeypatch) -> None:
@@ -204,7 +204,7 @@ def test_user_step_uses_existing_organization_when_text_input_blank(monkeypatch)
                 config_flow_module.CONF_EXISTING_ORGANIZATION: "org-one",
                 CONF_ORGANIZATION: "",
                 CONF_PAT: config_flow_module.PAT_REUSE_SENTINEL,
-                config_flow_module.CONF_REUSE_ENTRY: "entry-1",
+                config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN: "entry-1",
             }
         )
     )
@@ -213,3 +213,171 @@ def test_user_step_uses_existing_organization_when_text_input_blank(monkeypatch)
     assert result["step_id"] == "project"
     assert flow._organization == "org-one"
     assert flow._pat == "existing-pat"
+
+
+def test_reuse_credentials_options_are_filtered_by_selected_organization() -> None:
+    """Credential reuse options should only show entries for the selected organization."""
+    existing_entries = [
+        SimpleNamespace(
+            entry_id="entry-1",
+            title="org-one/Project One",
+            data={CONF_ORGANIZATION: "org-one", CONF_PAT: "pat-1"},
+        ),
+        SimpleNamespace(
+            entry_id="entry-2",
+            title="org-two/Project Two",
+            data={CONF_ORGANIZATION: "org-two", CONF_PAT: "pat-2"},
+        ),
+    ]
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
+    )
+    flow._selected_existing_organization = "org-one"
+
+    schema = flow._user_step_schema()
+    reuse_key = next(
+        key
+        for key in schema.schema
+        if getattr(key, "schema", None)
+        == config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN
+    )
+    reuse_selector = schema.schema[reuse_key]
+    options = reuse_selector.config.kwargs["options"]
+
+    assert options == [{"value": "entry-1", "label": "org-one/Project One"}]
+
+
+def test_reuse_credentials_options_are_empty_without_organization_context() -> None:
+    """Without an organization context, the PAT reuse dropdown should be empty."""
+    existing_entries = [
+        SimpleNamespace(
+            entry_id="entry-1",
+            title="org-one/Project One",
+            data={CONF_ORGANIZATION: "org-one", CONF_PAT: "pat-1"},
+        )
+    ]
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
+    )
+
+    schema = flow._user_step_schema()
+    reuse_key = next(
+        key
+        for key in schema.schema
+        if getattr(key, "schema", None)
+        == config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN
+    )
+    reuse_selector = schema.schema[reuse_key]
+
+    assert reuse_selector.config.kwargs["options"] == []
+
+
+def test_reuse_selection_clears_when_organization_changes() -> None:
+    """Changing organization context should clear an incompatible reuse selection."""
+    existing_entries = [
+        SimpleNamespace(
+            entry_id="entry-1",
+            title="org-one/Project One",
+            data={CONF_ORGANIZATION: "org-one", CONF_PAT: "pat-1"},
+        ),
+        SimpleNamespace(
+            entry_id="entry-2",
+            title="org-two/Project Two",
+            data={CONF_ORGANIZATION: "org-two", CONF_PAT: "pat-2"},
+        ),
+    ]
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
+    )
+    flow._selected_existing_organization = "org-one"
+    flow._selected_reuse_entry = "entry-2"
+
+    flow._user_step_schema()
+
+    assert flow._selected_reuse_entry == ""
+
+
+def test_clearing_existing_organization_clears_text_input_default() -> None:
+    """If an existing organization is cleared, the related text input should render blank."""
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [])
+    )
+    flow._organization_input = ""
+    flow._selected_existing_organization = ""
+
+    result = asyncio.run(flow.async_step_user({CONF_ORGANIZATION: "", CONF_PAT: ""}))
+
+    organization_key = next(
+        key for key in result["data_schema"].schema if getattr(key, "schema", None) == CONF_ORGANIZATION
+    )
+    assert organization_key.default() == ""
+
+
+def test_clearing_reuse_credentials_only_clears_pat_input() -> None:
+    """Clearing PAT reuse should not clear organization state."""
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        data={CONF_ORGANIZATION: "org-one", CONF_PAT: "existing-pat"},
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._selected_existing_organization = "org-one"
+    flow._organization_input = "org-one"
+    flow._selected_reuse_entry = "entry-1"
+    flow._pat_input = ""
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                config_flow_module.CONF_EXISTING_ORGANIZATION: "org-one",
+                CONF_ORGANIZATION: "org-one",
+                CONF_PAT: "",
+                config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN: "",
+            }
+        )
+    )
+
+    assert result["type"] == "form"
+    assert flow._organization_input == "org-one"
+    assert flow._selected_reuse_entry == ""
+    assert flow._pat_input == ""
+
+
+def test_clearing_organization_context_clears_reuse_and_pat_input() -> None:
+    """Clearing organization context should also clear PAT reuse state."""
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        data={CONF_ORGANIZATION: "org-one", CONF_PAT: "existing-pat"},
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._selected_existing_organization = "org-one"
+    flow._organization_input = "org-one"
+    flow._selected_reuse_entry = "entry-1"
+    flow._pat_input = "some-user-input"
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                config_flow_module.CONF_EXISTING_ORGANIZATION: "",
+                CONF_ORGANIZATION: "",
+                CONF_PAT: "",
+                config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN: "entry-1",
+            }
+        )
+    )
+
+    assert result["type"] == "form"
+    assert flow._organization_input == ""
+    assert flow._selected_reuse_entry == ""
+    assert flow._pat_input == ""
