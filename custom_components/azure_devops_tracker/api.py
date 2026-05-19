@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import logging
 from typing import Any
 
 import aiohttp
@@ -29,6 +30,8 @@ from .models import (
 
 BASE_URL = "https://dev.azure.com"
 PROFILE_URL = "https://app.vssps.visualstudio.com"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AzureDevOpsApiError(Exception):
@@ -58,6 +61,13 @@ class AzureDevOpsClient:
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Perform a JSON REST call."""
+        _LOGGER.debug(
+            "Azure DevOps request starting: method=%s url=%s params=%s has_json=%s",
+            method,
+            url,
+            params,
+            json_data is not None,
+        )
         async with self._session.request(
             method,
             url,
@@ -66,10 +76,25 @@ class AzureDevOpsClient:
             json=json_data,
         ) as response:
             if response.status in (401, 403):
+                _LOGGER.debug(
+                    "Azure DevOps authentication failed: method=%s url=%s status=%s params=%s",
+                    method,
+                    url,
+                    response.status,
+                    params,
+                )
                 raise AzureDevOpsAuthError("Authentication failed")
             if response.status >= 400:
                 body = await response.text()
                 body_preview = " ".join(body.split())[:200] if body else ""
+                _LOGGER.debug(
+                    "Azure DevOps request failed: method=%s url=%s status=%s params=%s body=%s",
+                    method,
+                    url,
+                    response.status,
+                    params,
+                    body_preview,
+                )
                 raise AzureDevOpsApiError(
                     f"Azure DevOps request failed: {response.status} for {url}"
                     f"{f' - {body_preview}' if body_preview else ''}"
@@ -77,11 +102,24 @@ class AzureDevOpsClient:
 
             data = await response.json(content_type=None)
             if not isinstance(data, dict):
+                _LOGGER.debug(
+                    "Azure DevOps returned unexpected payload type %s for url=%s",
+                    type(data).__name__,
+                    url,
+                )
                 raise AzureDevOpsApiError("Azure DevOps returned an unexpected payload")
+            _LOGGER.debug(
+                "Azure DevOps request succeeded: method=%s url=%s status=%s top_level_keys=%s",
+                method,
+                url,
+                response.status,
+                sorted(data.keys()),
+            )
             return data
 
     async def validate_organization(self, organization: str) -> None:
         """Validate the PAT against an organization."""
+        _LOGGER.debug("Validating Azure DevOps organization '%s' with supplied PAT", organization)
         await self._request_json(
             "GET",
             f"{BASE_URL}/{organization}/_apis/projects",
@@ -91,20 +129,27 @@ class AzureDevOpsClient:
     async def get_current_user(self, organization: str) -> IdentityInfo:
         """Return the signed-in profile."""
         try:
+            _LOGGER.debug("Resolving current Azure DevOps user via profile host for organization '%s'", organization)
             data = await self._request_json(
                 "GET",
                 f"{PROFILE_URL}/_apis/profile/profiles/me",
                 params={"api-version": API_VERSION_PROFILE, "details": "true"},
             )
-            return IdentityInfo(
+            identity = IdentityInfo(
                 id=data.get("id"),
                 display_name=data.get("displayName"),
                 unique_name=data.get("emailAddress"),
             )
+            _LOGGER.debug("Resolved current Azure DevOps user via profile host: %s", identity.as_dict())
+            return identity
         except AzureDevOpsAuthError:
             # Some PATs work for project-scoped APIs but not the profile host.
             # Fall back to connection data on dev.azure.com so the integration
             # can still load instead of failing the whole config entry.
+            _LOGGER.debug(
+                "Profile host rejected PAT for organization '%s'; falling back to connectionData",
+                organization,
+            )
             data = await self._request_json(
                 "GET",
                 f"{BASE_URL}/{organization}/_apis/connectionData",
@@ -116,7 +161,7 @@ class AzureDevOpsClient:
                 },
             )
             authenticated_user = data.get("authenticatedUser") or {}
-            return IdentityInfo(
+            identity = IdentityInfo(
                 id=authenticated_user.get("id") or authenticated_user.get("descriptor"),
                 display_name=authenticated_user.get("providerDisplayName")
                 or authenticated_user.get("customDisplayName")
@@ -124,6 +169,8 @@ class AzureDevOpsClient:
                 unique_name=authenticated_user.get("uniqueName")
                 or authenticated_user.get("subjectDescriptor"),
             )
+            _LOGGER.debug("Resolved current Azure DevOps user via connectionData fallback: %s", identity.as_dict())
+            return identity
 
     async def list_projects(self, organization: str) -> list[ProjectInfo]:
         """Return visible projects for an organization."""
@@ -132,7 +179,7 @@ class AzureDevOpsClient:
             f"{BASE_URL}/{organization}/_apis/projects",
             params={"api-version": API_VERSION_CORE, "$top": 500},
         )
-        return [
+        projects = [
             ProjectInfo(
                 id=item["id"],
                 name=item["name"],
@@ -143,6 +190,8 @@ class AzureDevOpsClient:
             )
             for item in data.get("value", [])
         ]
+        _LOGGER.debug("Loaded %s Azure DevOps projects for organization '%s'", len(projects), organization)
+        return projects
 
     async def list_pipelines(self, organization: str, project: str) -> list[PipelineInfo]:
         """Return build definitions for a project."""
@@ -151,7 +200,7 @@ class AzureDevOpsClient:
             f"{BASE_URL}/{organization}/{project}/_apis/build/definitions",
             params={"api-version": API_VERSION_BUILD, "$top": 500},
         )
-        return [
+        pipelines = [
             PipelineInfo(
                 definition_id=item["id"],
                 name=item["name"],
@@ -161,6 +210,12 @@ class AzureDevOpsClient:
             )
             for item in data.get("value", [])
         ]
+        _LOGGER.debug(
+            "Loaded %s pipeline definitions for Azure DevOps project '%s'",
+            len(pipelines),
+            project,
+        )
+        return pipelines
 
     async def list_builds(self, organization: str, project: str) -> list[BuildInfo]:
         """Return recent builds."""
@@ -197,6 +252,7 @@ class AzureDevOpsClient:
                     url=web.get("href"),
                 )
             )
+        _LOGGER.debug("Loaded %s builds for Azure DevOps project '%s'", len(builds), project)
         return builds
 
     async def list_pull_requests(self, organization: str, project: str) -> list[PullRequestInfo]:
@@ -229,6 +285,7 @@ class AzureDevOpsClient:
                     reviewers=reviewers,
                 )
             )
+        _LOGGER.debug("Loaded %s pull requests for Azure DevOps project '%s'", len(pull_requests), project)
         return pull_requests
 
     async def list_pull_request_comments(
@@ -264,6 +321,12 @@ class AzureDevOpsClient:
                         is_deleted=comment.get("isDeleted", False),
                     )
                 )
+        _LOGGER.debug(
+            "Loaded %s comments/threads entries for pull request %s in project '%s'",
+            len(comments),
+            pull_request_id,
+            project,
+        )
         return comments
 
     async def list_policy_evaluations(
@@ -296,6 +359,12 @@ class AzureDevOpsClient:
                     is_blocking=configuration.get("isBlocking", False),
                 )
             )
+        _LOGGER.debug(
+            "Loaded %s policy evaluations for pull request %s in project '%s'",
+            len(policies),
+            pull_request_id,
+            project,
+        )
         return policies
 
     async def list_work_items(self, organization: str, project: str) -> list[WorkItemInfo]:
@@ -343,6 +412,7 @@ class AzureDevOpsClient:
                         url=item.get("url"),
                     )
                 )
+        _LOGGER.debug("Loaded %s work items for Azure DevOps project '%s'", len(work_items), project)
         return work_items
 
     @staticmethod

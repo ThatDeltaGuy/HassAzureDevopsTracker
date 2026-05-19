@@ -133,6 +133,16 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch a full project snapshot."""
         try:
+            _LOGGER.debug(
+                "Starting Azure DevOps refresh for organization='%s' configured_project='%s' options={builds=%s, work_items=%s, prs=%s, comments=%s, policies=%s}",
+                self.organization,
+                self.project.name,
+                self.enable_builds,
+                self.enable_work_items,
+                self.enable_pull_requests,
+                self.enable_pr_comments,
+                self.enable_pr_policies,
+            )
             current_user = await self.client.get_current_user(self.organization)
             project = await self._resolve_project()
 
@@ -153,10 +163,30 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
             await self._process_transitions(data)
             self.update_interval = timedelta(seconds=self.scan_interval_seconds)
+            _LOGGER.debug(
+                "Completed Azure DevOps refresh for project '%s': pipelines=%s builds=%s work_items=%s matched_prs=%s",
+                project.name,
+                len(pipelines),
+                len(builds),
+                len(work_items),
+                len(pull_requests),
+            )
             return data
         except AzureDevOpsAuthError as err:
+            _LOGGER.debug(
+                "Azure DevOps authentication failed during refresh for organization='%s' project='%s': %s",
+                self.organization,
+                self.project.name,
+                err,
+            )
             raise ConfigEntryAuthFailed from err
         except AzureDevOpsApiError as err:
+            _LOGGER.debug(
+                "Azure DevOps API failure during refresh for organization='%s' project='%s': %s",
+                self.organization,
+                self.project.name,
+                err,
+            )
             raise UpdateFailed(str(err)) from err
 
     async def _resolve_project(self) -> ProjectInfo:
@@ -165,6 +195,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         for project in projects:
             if project.id == self.project.id:
                 self.project = project
+                _LOGGER.debug("Resolved configured Azure DevOps project: %s", project)
                 return project
 
         raise UpdateFailed(f"Configured project {self.project.id} is no longer visible")
@@ -211,6 +242,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 for reviewer in pr.reviewers
             )
             if not is_author and not is_reviewer:
+                _LOGGER.debug(
+                    "Skipping PR %s for current user; author=%s reviewers=%s",
+                    pr.pull_request_id,
+                    pr.author.as_dict(),
+                    [reviewer.as_dict() for reviewer in pr.reviewers],
+                )
                 continue
 
             if self.enable_pr_comments and pr.repository_id:
