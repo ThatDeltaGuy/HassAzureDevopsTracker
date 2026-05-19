@@ -245,7 +245,10 @@ def test_reuse_credentials_options_are_filtered_by_selected_organization() -> No
     reuse_selector = schema.schema[reuse_key]
     options = reuse_selector.config.kwargs["options"]
 
-    assert options == [{"value": "entry-1", "label": "org-one/Project One"}]
+    assert options == [
+        {"value": "", "label": ""},
+        {"value": "entry-1", "label": "org-one/Project One"},
+    ]
 
 
 def test_reuse_credentials_options_are_empty_without_organization_context() -> None:
@@ -271,7 +274,32 @@ def test_reuse_credentials_options_are_empty_without_organization_context() -> N
     )
     reuse_selector = schema.schema[reuse_key]
 
-    assert reuse_selector.config.kwargs["options"] == []
+    assert reuse_selector.config.kwargs["options"] == [{"value": "", "label": ""}]
+
+
+def test_existing_organization_dropdown_includes_blank_option_first() -> None:
+    """Existing organization selector should allow a blank choice for manual entry."""
+    existing_entries = [
+        SimpleNamespace(
+            entry_id="entry-1",
+            title="org-one/Project One",
+            data={CONF_ORGANIZATION: "org-one", CONF_PAT: "pat-1"},
+        )
+    ]
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
+    )
+
+    schema = flow._user_step_schema()
+    org_key = next(
+        key
+        for key in schema.schema
+        if getattr(key, "schema", None) == config_flow_module.CONF_EXISTING_ORGANIZATION
+    )
+    org_selector = schema.schema[org_key]
+
+    assert org_selector.config.kwargs["options"][0] == {"value": "", "label": ""}
 
 
 def test_reuse_selection_clears_when_organization_changes() -> None:

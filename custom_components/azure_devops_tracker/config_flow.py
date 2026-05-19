@@ -105,10 +105,6 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         existing_organizations = self._existing_organizations()
         schema: dict[Any, Any] = {}
 
-        schema[
-            vol.Required(CONF_ORGANIZATION, default=self._organization_input)
-        ] = TextSelector()
-
         selected_organization_context = (
             self._organization_input or self._selected_existing_organization or None
         )
@@ -124,12 +120,19 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             ] = SelectSelector(
                 SelectSelectorConfig(
                     options=[
+                        {"value": "", "label": ""},
+                    ]
+                    + [
                         {"value": organization, "label": organization}
                         for organization in existing_organizations
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             )
+
+        schema[
+            vol.Required(CONF_ORGANIZATION, default=self._organization_input)
+        ] = TextSelector()
 
         if existing_entries:
             selected_reuse_entry = self._get_reuse_entry(self._selected_reuse_entry)
@@ -147,6 +150,9 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             ] = SelectSelector(
                 SelectSelectorConfig(
                     options=[
+                        {"value": "", "label": ""},
+                    ]
+                    + [
                         {"value": entry.entry_id, "label": entry.title}
                         for entry in filtered_entries
                     ],
