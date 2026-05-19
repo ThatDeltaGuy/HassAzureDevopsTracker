@@ -185,6 +185,36 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             selected_organization = user_input.get(CONF_EXISTING_ORGANIZATION, "").strip()
             selected_reuse_entry = user_input.get(CONF_REUSE_PERSONAL_ACCESS_TOKEN, "").strip()
             entered_organization = user_input.get(CONF_ORGANIZATION, "").strip()
+            entered_pat_raw = user_input.get(CONF_PAT, "").strip()
+
+            organization_selection_changed = (
+                selected_organization != self._selected_existing_organization
+            )
+            reuse_selection_changed = selected_reuse_entry != self._selected_reuse_entry
+
+            if organization_selection_changed and not entered_organization:
+                self._selected_existing_organization = selected_organization
+                self._organization_input = selected_organization
+                self._organization = selected_organization or None
+                self._selected_reuse_entry = ""
+                self._pat_input = ""
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._user_step_schema(),
+                    errors=errors,
+                )
+
+            if reuse_selection_changed and not entered_pat_raw:
+                self._selected_existing_organization = selected_organization
+                self._organization_input = entered_organization or selected_organization or ""
+                self._organization = self._organization_input or None
+                self._selected_reuse_entry = selected_reuse_entry
+                self._pat_input = PAT_REUSE_SENTINEL if selected_reuse_entry else ""
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._user_step_schema(),
+                    errors=errors,
+                )
 
             if not entered_organization and not selected_organization:
                 selected_reuse_entry = ""
@@ -202,7 +232,7 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
 
             self._selected_reuse_entry = selected_reuse_entry
             reuse_entry = self._get_reuse_entry(selected_reuse_entry)
-            entered_pat = user_input.get(CONF_PAT, "").strip()
+            entered_pat = entered_pat_raw
             if entered_pat == PAT_REUSE_SENTINEL:
                 entered_pat = ""
             if not selected_reuse_entry:

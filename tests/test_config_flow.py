@@ -210,9 +210,68 @@ def test_user_step_uses_existing_organization_when_text_input_blank(monkeypatch)
     )
 
     assert result["type"] == "form"
-    assert result["step_id"] == "project"
+    assert result["step_id"] == "user"
     assert flow._organization == "org-one"
-    assert flow._pat == "existing-pat"
+    assert flow._pat_input == ""
+
+
+def test_selecting_existing_organization_prefills_organization_input() -> None:
+    """Choosing an existing organization should rerender the form with the input prefilled."""
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        data={CONF_ORGANIZATION: "org-one", CONF_PAT: "existing-pat"},
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                config_flow_module.CONF_EXISTING_ORGANIZATION: "org-one",
+                CONF_ORGANIZATION: "",
+                CONF_PAT: "",
+                config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN: "",
+            }
+        )
+    )
+
+    organization_key = next(
+        key for key in result["data_schema"].schema if getattr(key, "schema", None) == CONF_ORGANIZATION
+    )
+    assert organization_key.default() == "org-one"
+
+
+def test_selecting_reuse_entry_prefills_pat_placeholder() -> None:
+    """Choosing a PAT reuse entry should rerender the form with the sentinel placeholder."""
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        data={CONF_ORGANIZATION: "org-one", CONF_PAT: "existing-pat"},
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._organization_input = "org-one"
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                config_flow_module.CONF_EXISTING_ORGANIZATION: "org-one",
+                CONF_ORGANIZATION: "org-one",
+                CONF_PAT: "",
+                config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN: "entry-1",
+            }
+        )
+    )
+
+    pat_key = next(
+        key for key in result["data_schema"].schema if getattr(key, "schema", None) == CONF_PAT
+    )
+    assert pat_key.default() == config_flow_module.PAT_REUSE_SENTINEL
 
 
 def test_reuse_credentials_options_are_filtered_by_selected_organization() -> None:

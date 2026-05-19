@@ -214,6 +214,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         relevant_prs: list[PullRequestInfo] = []
 
         current_user_aliases = self._identity_aliases(current_user)
+        current_user_id = current_user.id.casefold() if current_user.id else None
 
         _LOGGER.debug(
             "Evaluating %s pull requests for project '%s' using current user %s",
