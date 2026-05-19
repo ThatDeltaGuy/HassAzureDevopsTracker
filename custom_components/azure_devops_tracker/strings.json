@@ -14,11 +14,12 @@
     "step": {
       "user": {
         "title": "Connect to Azure DevOps",
-        "description": "Enter your Azure DevOps organization and PAT. If another Azure DevOps Tracker entry already exists, its PAT can be reused by selecting it and leaving the PAT field blank.",
+        "description": "Choose an existing organization or enter a new one. If another Azure DevOps Tracker entry already exists, credentials can be reused by selecting it and leaving the PAT field set to the placeholder value.",
         "data": {
+          "existing_organization": "Existing Organizations",
           "organization": "Organization",
           "personal_access_token": "Personal access token",
-          "reuse_entry": "Reuse credentials from existing entry"
+          "reuse_entry": "Reuse Credentials"
         }
       },
       "project": {

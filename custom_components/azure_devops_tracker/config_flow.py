@@ -46,7 +46,9 @@ from .const import (
 from .models import ProjectInfo
 from .options_flow import AzureDevOpsTrackerOptionsFlow
 
+CONF_EXISTING_ORGANIZATION = "existing_organization"
 CONF_REUSE_ENTRY = "reuse_entry"
+PAT_REUSE_SENTINEL = "123456789abcdefghijklmnopqrstuvwxyz"
 
 
 class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -64,6 +66,15 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Return existing integration entries."""
         return list(self.hass.config_entries.async_entries(DOMAIN))
 
+    def _existing_organizations(self) -> list[str]:
+        """Return unique organizations from existing entries."""
+        organizations = {
+            entry.data.get(CONF_ORGANIZATION)
+            for entry in self._existing_entries()
+            if entry.data.get(CONF_ORGANIZATION)
+        }
+        return sorted(organizations)
+
     def _get_reuse_entry(self, entry_id: str | None):
         """Return an existing entry selected for reuse."""
         if not entry_id:
@@ -76,7 +87,21 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
     def _user_step_schema(self) -> vol.Schema:
         """Build the first-step schema, including reuse options when available."""
         existing_entries = self._existing_entries()
+        existing_organizations = self._existing_organizations()
         schema: dict[Any, Any] = {}
+
+        if existing_organizations:
+            schema[
+                vol.Optional(CONF_EXISTING_ORGANIZATION)
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        {"value": organization, "label": organization}
+                        for organization in existing_organizations
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
 
         if existing_entries:
             schema[
@@ -99,12 +124,14 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_ORGANIZATION, default=default_organization or "")
         ] = TextSelector()
 
-        pat_key: Any = (
-            vol.Optional(CONF_PAT)
-            if existing_entries
-            else vol.Required(CONF_PAT)
-        )
-        schema[pat_key] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+        if existing_entries:
+            schema[
+                vol.Optional(CONF_PAT, default=PAT_REUSE_SENTINEL)
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+        else:
+            schema[
+                vol.Required(CONF_PAT)
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
         return vol.Schema(schema)
 
@@ -119,9 +146,13 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 1: PAT and organization."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            selected_organization = user_input.get(CONF_EXISTING_ORGANIZATION, "").strip()
             reuse_entry = self._get_reuse_entry(user_input.get(CONF_REUSE_ENTRY))
-            self._organization = user_input[CONF_ORGANIZATION].strip()
+            entered_organization = user_input.get(CONF_ORGANIZATION, "").strip()
+            self._organization = entered_organization or selected_organization or None
             entered_pat = user_input.get(CONF_PAT, "").strip()
+            if entered_pat == PAT_REUSE_SENTINEL:
+                entered_pat = ""
             self._pat = entered_pat or (
                 reuse_entry.data.get(CONF_PAT) if reuse_entry is not None else None
             )

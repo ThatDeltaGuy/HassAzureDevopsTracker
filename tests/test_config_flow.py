@@ -153,7 +153,7 @@ def test_user_step_reuses_pat_from_existing_entry(monkeypatch) -> None:
         flow.async_step_user(
             {
                 CONF_ORGANIZATION: "org-one",
-                CONF_PAT: "",
+                CONF_PAT: config_flow_module.PAT_REUSE_SENTINEL,
                 config_flow_module.CONF_REUSE_ENTRY: "entry-1",
             }
         )
@@ -182,3 +182,34 @@ def test_user_step_defaults_organization_from_existing_entry() -> None:
         key for key in result["data_schema"].schema if getattr(key, "schema", None) == CONF_ORGANIZATION
     )
     assert organization_key.default() == "org-one"
+
+
+def test_user_step_uses_existing_organization_when_text_input_blank(monkeypatch) -> None:
+    """Selecting an existing organization should work without typing it again."""
+    monkeypatch.setattr(config_flow_module, "AzureDevOpsClient", _FakeClient)
+
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        data={CONF_ORGANIZATION: "org-one", CONF_PAT: "existing-pat"},
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                config_flow_module.CONF_EXISTING_ORGANIZATION: "org-one",
+                CONF_ORGANIZATION: "",
+                CONF_PAT: config_flow_module.PAT_REUSE_SENTINEL,
+                config_flow_module.CONF_REUSE_ENTRY: "entry-1",
+            }
+        )
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "project"
+    assert flow._organization == "org-one"
+    assert flow._pat == "existing-pat"
