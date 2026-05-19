@@ -108,11 +108,11 @@ class PullRequestInfo:
     reviewers: list[IdentityInfo] = field(default_factory=list)
     policies: list[PolicyInfo] = field(default_factory=list)
     latest_comment: CommentInfo | None = None
-    latest_unseen_comment: CommentInfo | None = None
+    latest_new_comment: CommentInfo | None = None
     active_comments: list[CommentInfo] = field(default_factory=list)
     active_comment_count: int = 0
     has_active_comments: bool = False
-    unseen_comment_count: int = 0
+    new_comment_count: int = 0
     has_new_comment: bool = False
     build_failed: bool = False
     ready_to_complete: bool = False
@@ -145,13 +145,13 @@ class PullRequestInfo:
             "latest_comment": self.latest_comment.as_dict()
             if self.latest_comment
             else None,
-            "latest_unseen_comment": self.latest_unseen_comment.as_dict()
-            if self.latest_unseen_comment
+            "latest_new_comment": self.latest_new_comment.as_dict()
+            if self.latest_new_comment
             else None,
             "active_comments": [comment.as_dict() for comment in self.active_comments],
             "active_comment_count": self.active_comment_count,
             "has_active_comments": self.has_active_comments,
-            "unseen_comment_count": self.unseen_comment_count,
+            "new_comment_count": self.new_comment_count,
             "has_new_comment": self.has_new_comment,
             "build_failed": self.build_failed,
             "ready_to_complete": self.ready_to_complete,

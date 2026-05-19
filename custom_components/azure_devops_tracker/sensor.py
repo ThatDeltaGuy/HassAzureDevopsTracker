@@ -44,7 +44,7 @@ async def async_setup_entry(
             new_entities.extend(
                 [
                     PullRequestStateSensor(coordinator, pull_request.pull_request_id),
-                    PullRequestUnseenCommentCountSensor(coordinator, pull_request.pull_request_id),
+                    PullRequestNewCommentCountSensor(coordinator, pull_request.pull_request_id),
                 ]
             )
         if new_entities:
@@ -253,7 +253,7 @@ class PullRequestStateSensor(AzureDevOpsTrackerPullRequestSensor):
         pull_request = self.pull_request
         if pull_request is None:
             return {}
-        latest_comment = pull_request.latest_unseen_comment or pull_request.latest_comment
+        latest_comment = pull_request.latest_new_comment or pull_request.latest_comment
         return {
             **pull_request.as_dict(),
             "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
@@ -262,35 +262,35 @@ class PullRequestStateSensor(AzureDevOpsTrackerPullRequestSensor):
         }
 
 
-class PullRequestUnseenCommentCountSensor(AzureDevOpsTrackerPullRequestSensor):
-    """Unseen comment count sensor for a single pull request."""
+class PullRequestNewCommentCountSensor(AzureDevOpsTrackerPullRequestSensor):
+    """New comment count sensor for a single pull request."""
 
     _attr_icon = "mdi:comment-processing-outline"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator, pull_request_id: int) -> None:
         super().__init__(coordinator, pull_request_id)
         self._attr_unique_id = (
-            f"{coordinator.project.id}_pull_request_{pull_request_id}_unseen_comment_count"
+            f"{coordinator.project.id}_pull_request_{pull_request_id}_new_comment_count"
         )
 
     @property
     def name(self) -> str:
         """Return a display name for the PR comment counter."""
-        return f"PR {self.pull_request_id} unseen comments"
+        return f"PR {self.pull_request_id} new comments"
 
     @property
     def native_value(self) -> StateType:
         pull_request = self.pull_request
         if pull_request is None:
             return None
-        return pull_request.unseen_comment_count
+        return pull_request.new_comment_count
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any]:
         pull_request = self.pull_request
         if pull_request is None:
             return {}
-        latest_comment = pull_request.latest_unseen_comment
+        latest_comment = pull_request.latest_new_comment
         return {
             "pull_request_title": pull_request.title,
             "pull_request_url": pull_request.url,

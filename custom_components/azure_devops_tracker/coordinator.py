@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import re
 from typing import Any
@@ -33,6 +33,7 @@ from .const import (
     EVENT_PR_BUILD_FAILED,
     EVENT_PR_READY_TO_COMPLETE,
     HUMAN_COMMENT_TYPE,
+    NEW_COMMENT_WINDOW,
     OPTION_ENABLE_BUILDS,
     OPTION_ENABLE_PR_POLICIES,
     OPTION_ENABLE_PULL_REQUEST_COMMENTS,
@@ -251,16 +252,18 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     pr.repository_id,
                     pr.pull_request_id,
                 )
-                pr.latest_comment, pr.latest_unseen_comment, pr.unseen_comment_count = self._classify_comments(
+                pr.latest_comment, pr.latest_new_comment, pr.new_comment_count = self._classify_comments(
                     comments,
-                    current_user_id,
+                    current_user_aliases,
                     bootstrap=not self._initialized,
                     pr_key=str(pr.pull_request_id),
+                    bootstrap_cutoff=self.entry.created_at,
+                    now=datetime.now(timezone.utc),
                 )
                 pr.active_comments = self._active_comments(comments)
                 pr.active_comment_count = len(pr.active_comments)
                 pr.has_active_comments = pr.active_comment_count > 0
-                pr.has_new_comment = pr.latest_unseen_comment is not None
+                pr.has_new_comment = pr.latest_new_comment is not None
 
             if self.enable_pr_policies:
                 pr.policies = await self.client.list_policy_evaluations(
@@ -315,44 +318,113 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def _classify_comments(
         self,
         comments: list[CommentInfo],
-        current_user_id: str | None,
+        current_user_aliases: set[str],
         *,
         bootstrap: bool,
         pr_key: str,
+        bootstrap_cutoff: datetime | None,
+        now: datetime,
     ) -> tuple[CommentInfo | None, CommentInfo | None, int]:
-        """Return the latest comment and unseen human comment details."""
+        """Return the latest comment and new human comment details."""
         sorted_comments = sorted(
             comments,
             key=lambda item: (item.published_date or "", item.comment_id),
         )
         latest_comment = sorted_comments[-1] if sorted_comments else None
 
-        seen_comment_ids = set(self._seen_state.get("comments", {}).get(pr_key, []))
+        stored_comments = self._seen_state.get("comments", {}).get(pr_key, {})
+        tracked_comments = self._normalize_tracked_comments(stored_comments)
         if bootstrap and pr_key not in self._seen_state.get("comments", {}):
-            seen_comment_ids = {
-                comment.comment_id
+            tracked_comments = {
+                comment.comment_id: self._bootstrap_seen_timestamp(
+                    comment,
+                    current_user_aliases,
+                    bootstrap_cutoff,
+                )
                 for comment in sorted_comments
-                if comment.author.id and comment.author.id.casefold() != current_user_id
+                if self._should_mark_seen_on_bootstrap(comment, current_user_aliases, bootstrap_cutoff)
             }
 
-        unseen_comments: list[CommentInfo] = []
-        persisted_seen = set(seen_comment_ids)
+        new_comments: list[CommentInfo] = []
         for comment in sorted_comments:
             if comment.is_deleted or comment.comment_type != HUMAN_COMMENT_TYPE:
-                persisted_seen.add(comment.comment_id)
                 continue
-            if comment.author.id and comment.author.id.casefold() == current_user_id:
-                persisted_seen.add(comment.comment_id)
+            if self._identity_matches(comment.author, current_user_aliases):
                 continue
-            if not comment.text or comment.comment_id in seen_comment_ids:
-                persisted_seen.add(comment.comment_id)
+            if not comment.text:
                 continue
-            unseen_comments.append(comment)
-            persisted_seen.add(comment.comment_id)
+            detected_at = tracked_comments.get(comment.comment_id)
+            if detected_at is None:
+                tracked_comments[comment.comment_id] = now.isoformat()
+                detected_at = tracked_comments[comment.comment_id]
 
-        self._seen_state.setdefault("comments", {})[pr_key] = sorted(persisted_seen)
-        latest_unseen = unseen_comments[-1] if unseen_comments else None
-        return latest_comment, latest_unseen, len(unseen_comments)
+            detected_at_dt = self._parse_comment_datetime(detected_at)
+            if detected_at_dt is not None and now - detected_at_dt <= NEW_COMMENT_WINDOW:
+                new_comments.append(comment)
+
+        self._seen_state.setdefault("comments", {})[pr_key] = {
+            str(comment_id): detected_at
+            for comment_id, detected_at in tracked_comments.items()
+        }
+        latest_new = new_comments[-1] if new_comments else None
+        return latest_comment, latest_new, len(new_comments)
+
+    @staticmethod
+    def _normalize_tracked_comments(stored_comments: Any) -> dict[int, str]:
+        """Normalize stored comment tracking state from older formats."""
+        if isinstance(stored_comments, dict):
+            normalized: dict[int, str] = {}
+            for comment_id, detected_at in stored_comments.items():
+                try:
+                    normalized[int(comment_id)] = str(detected_at)
+                except (TypeError, ValueError):
+                    continue
+            return normalized
+        if isinstance(stored_comments, list):
+            return {int(comment_id): "1970-01-01T00:00:00+00:00" for comment_id in stored_comments}
+        return {}
+
+    @classmethod
+    def _should_mark_seen_on_bootstrap(
+        cls,
+        comment: CommentInfo,
+        current_user_aliases: set[str],
+        bootstrap_cutoff: datetime | None,
+    ) -> bool:
+        """Return whether a comment should be treated as already seen on first load."""
+        if cls._identity_matches(comment.author, current_user_aliases):
+            return True
+        if bootstrap_cutoff is None:
+            return True
+        published_at = cls._parse_comment_datetime(comment.published_date)
+        if published_at is None:
+            return True
+        return published_at <= bootstrap_cutoff.astimezone(timezone.utc)
+
+    @classmethod
+    def _bootstrap_seen_timestamp(
+        cls,
+        comment: CommentInfo,
+        current_user_aliases: set[str],
+        bootstrap_cutoff: datetime | None,
+    ) -> str:
+        """Return a stored timestamp for comments marked seen during bootstrap."""
+        if cls._identity_matches(comment.author, current_user_aliases):
+            published_at = cls._parse_comment_datetime(comment.published_date)
+            if published_at is not None:
+                return published_at.isoformat()
+        return "1970-01-01T00:00:00+00:00"
+
+    @staticmethod
+    def _parse_comment_datetime(value: str | None) -> datetime | None:
+        """Parse Azure DevOps datetime strings for comment comparison."""
+        if not value:
+            return None
+        normalized = value.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
 
     @staticmethod
     def _active_comments(comments: list[CommentInfo]) -> list[CommentInfo]:
@@ -373,7 +445,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         for pr in data.pull_requests:
             pr_key = str(pr.pull_request_id)
-            if self._initialized and pr.latest_unseen_comment is not None:
+            if self._initialized and pr.latest_new_comment is not None:
                 payload = {
                     "organization": data.organization,
                     "project_id": data.project.id,
@@ -383,7 +455,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     "pull_request_url": pr.url,
                     "repository_id": pr.repository_id,
                     "repository_name": pr.repository_name,
-                    **pr.latest_unseen_comment.as_dict(),
+                    **pr.latest_new_comment.as_dict(),
                 }
                 self._dispatch_event(EVENT_NEW_PR_COMMENT, payload)
 
@@ -487,7 +559,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     @property
     def latest_unseen_comment(self) -> CommentInfo | None:
-        comments = [pr.latest_unseen_comment for pr in self.pull_requests_with_new_comments if pr.latest_unseen_comment]
+        comments = [pr.latest_new_comment for pr in self.pull_requests_with_new_comments if pr.latest_new_comment]
         if not comments:
             return None
         return sorted(comments, key=lambda item: (item.published_date or "", item.comment_id))[-1]

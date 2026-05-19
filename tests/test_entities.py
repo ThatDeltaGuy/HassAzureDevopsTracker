@@ -20,8 +20,8 @@ from custom_components.azure_devops_tracker.models import CommentInfo, IdentityI
 from custom_components.azure_devops_tracker.event import AzureDevOpsTrackerProjectEvent
 from custom_components.azure_devops_tracker.sensor import (
     PullRequestsWithActiveCommentsSensor,
+    PullRequestNewCommentCountSensor,
     PullRequestStateSensor,
-    PullRequestUnseenCommentCountSensor,
     async_setup_entry as async_setup_sensor_entry,
 )
 
@@ -45,7 +45,7 @@ class _DynamicCoordinator(SimpleNamespace):
             failed_builds=[],
             work_items_by_type={},
             work_items_by_state={},
-            latest_unseen_comment=(pull_requests[0].latest_unseen_comment if pull_requests else None),
+            latest_unseen_comment=(pull_requests[0].latest_new_comment if pull_requests else None),
             async_add_listener=self.async_add_listener,
             async_add_event_listener=self.async_add_event_listener,
             get_pull_request=lambda pull_request_id: next(
@@ -108,11 +108,11 @@ def _pull_request() -> PullRequestInfo:
         repository_name="Main Repo",
         author=IdentityInfo(id="author-1", display_name="Author", unique_name="author@example.com"),
         latest_comment=latest_comment,
-        latest_unseen_comment=latest_comment,
+        latest_new_comment=latest_comment,
         active_comments=[latest_comment],
         active_comment_count=1,
         has_active_comments=True,
-        unseen_comment_count=2,
+        new_comment_count=2,
         has_new_comment=True,
         build_failed=True,
         ready_to_complete=True,
@@ -131,12 +131,12 @@ def test_pull_request_state_sensor_exposes_pr_details() -> None:
     assert sensor.extra_state_attributes["latest_comment_text"] == "Please update the null handling."
 
 
-def test_pull_request_unseen_comment_sensor_exposes_latest_comment() -> None:
-    """Per-PR unseen comment sensor should expose comment details."""
+def test_pull_request_new_comment_sensor_exposes_latest_comment() -> None:
+    """Per-PR new comment sensor should expose comment details."""
     pull_request = _pull_request()
-    sensor = PullRequestUnseenCommentCountSensor(_coordinator_for_pull_request(pull_request), pull_request.pull_request_id)
+    sensor = PullRequestNewCommentCountSensor(_coordinator_for_pull_request(pull_request), pull_request.pull_request_id)
 
-    assert sensor.name == "PR 23 unseen comments"
+    assert sensor.name == "PR 23 new comments"
     assert sensor.native_value == 2
     assert sensor.extra_state_attributes["latest_comment_author"] == "Reviewer"
     assert sensor.extra_state_attributes["latest_comment_file_path"] == "/src/service.cs"
@@ -191,7 +191,7 @@ def test_dynamic_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:
     assert "Open pull requests" in entity_names
     assert "Pull requests with active comments" in entity_names
     assert "PR 23 state" in entity_names
-    assert "PR 23 unseen comments" in entity_names
+    assert "PR 23 new comments" in entity_names
 
 
 def test_dynamic_binary_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:

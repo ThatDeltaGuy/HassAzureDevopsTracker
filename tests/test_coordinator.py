@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from custom_components.azure_devops_tracker.const import HUMAN_COMMENT_TYPE
@@ -42,7 +43,7 @@ def _comment(
     )
 
 
-def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bool = False, ready: bool = False, latest_unseen_comment: CommentInfo | None = None, unseen_count: int = 0) -> PullRequestInfo:
+def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bool = False, ready: bool = False, latest_new_comment: CommentInfo | None = None, new_count: int = 0) -> PullRequestInfo:
     return PullRequestInfo(
         pull_request_id=pr_id,
         title=f"PR {pr_id}",
@@ -56,9 +57,9 @@ def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bo
         repository_id="repo-1",
         repository_name="Repo",
         author=IdentityInfo(id="author-1", display_name="Author", unique_name="author@example.com"),
-        latest_unseen_comment=latest_unseen_comment,
+        latest_new_comment=latest_new_comment,
         has_new_comment=has_new_comment,
-        unseen_comment_count=unseen_count,
+        new_comment_count=new_count,
         build_failed=build_failed,
         ready_to_complete=ready,
         policies=[
@@ -111,15 +112,17 @@ def test_classify_comments_ignores_deleted_system_and_own_comments() -> None:
     latest_comment, latest_unseen, unseen_count = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [own_comment, system_comment, deleted_comment, unseen_comment],
-        "me",
+        {"me"},
         bootstrap=False,
         pr_key="42",
+        bootstrap_cutoff=None,
+        now=datetime(2026, 5, 18, 10, 5, tzinfo=timezone.utc),
     )
 
     assert latest_comment == unseen_comment
     assert latest_unseen == unseen_comment
     assert unseen_count == 1
-    assert coordinator._seen_state["comments"]["42"] == [1, 2, 3, 4]
+    assert set(coordinator._seen_state["comments"]["42"].keys()) == {"4"}
 
 
 def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
@@ -138,14 +141,98 @@ def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
     _latest_comment, latest_unseen, unseen_count = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [bootstrap_comment],
-        "me",
+        {"me"},
         bootstrap=True,
         pr_key="101",
+        bootstrap_cutoff=datetime(2026, 5, 18, 10, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 18, 10, 5, tzinfo=timezone.utc),
     )
 
     assert latest_unseen is None
     assert unseen_count == 0
-    assert coordinator._seen_state["comments"]["101"] == [7]
+    assert "7" in coordinator._seen_state["comments"]["101"]
+
+
+def test_classify_comments_bootstrap_keeps_comments_new_if_after_entry_creation() -> None:
+    """Comments newer than the entry creation time should remain unseen on first success."""
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {}
+
+    new_comment = _comment(
+        8,
+        author_id="user-8",
+        author_name="Reviewer",
+        text="New comment after setup",
+        published_date="2026-05-18T10:30:00Z",
+    )
+
+    _latest_comment, latest_unseen, unseen_count = AzureDevOpsCoordinator._classify_comments(
+        coordinator,
+        [new_comment],
+        {"me"},
+        bootstrap=True,
+        pr_key="102",
+        bootstrap_cutoff=datetime(2026, 5, 18, 10, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 18, 10, 31, tzinfo=timezone.utc),
+    )
+
+    assert latest_unseen == new_comment
+    assert unseen_count == 1
+    assert "8" in coordinator._seen_state["comments"]["102"]
+
+
+def test_classify_comments_keeps_new_comments_for_fifteen_minutes() -> None:
+    """Detected comments should remain new for 15 minutes after first detection."""
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"comments": {"103": {"9": "2026-05-18T10:00:00+00:00"}}}
+
+    comment = _comment(
+        9,
+        author_id="user-9",
+        author_name="Reviewer",
+        text="Still new",
+        published_date="2026-05-18T09:59:00Z",
+    )
+
+    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+        coordinator,
+        [comment],
+        {"me"},
+        bootstrap=False,
+        pr_key="103",
+        bootstrap_cutoff=None,
+        now=datetime(2026, 5, 18, 10, 10, tzinfo=timezone.utc),
+    )
+
+    assert latest_new == comment
+    assert new_count == 1
+
+
+def test_classify_comments_expires_new_comments_after_fifteen_minutes() -> None:
+    """Detected comments should stop being new after 15 minutes."""
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"comments": {"104": {"10": "2026-05-18T10:00:00+00:00"}}}
+
+    comment = _comment(
+        10,
+        author_id="user-10",
+        author_name="Reviewer",
+        text="No longer new",
+        published_date="2026-05-18T09:59:00Z",
+    )
+
+    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+        coordinator,
+        [comment],
+        {"me"},
+        bootstrap=False,
+        pr_key="104",
+        bootstrap_cutoff=None,
+        now=datetime(2026, 5, 18, 10, 16, tzinfo=timezone.utc),
+    )
+
+    assert latest_new is None
+    assert new_count == 0
 
 
 def test_identity_matches_by_id_and_unique_name() -> None:
@@ -204,8 +291,8 @@ def test_process_transitions_emits_expected_events() -> None:
         has_new_comment=True,
         build_failed=True,
         ready=True,
-        latest_unseen_comment=latest_comment,
-        unseen_count=1,
+        latest_new_comment=latest_comment,
+        new_count=1,
     )
     data = CoordinatorData(
         organization="org",

@@ -76,7 +76,7 @@ class HasNewCommentBinarySensor(AzureDevOpsTrackerBinarySensor):
     def extra_state_attributes(self) -> Mapping[str, Any]:
         latest_comment = self.coordinator.latest_unseen_comment
         return {
-            "new_comment_count": sum(pr.unseen_comment_count for pr in self.coordinator.pull_requests_with_new_comments),
+            "new_comment_count": sum(pr.new_comment_count for pr in self.coordinator.pull_requests_with_new_comments),
             "pull_request_count": len(self.coordinator.pull_requests_with_new_comments),
             "pull_requests": [pr.as_dict() for pr in self.coordinator.pull_requests_with_new_comments],
             "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
@@ -189,11 +189,11 @@ class PullRequestHasNewCommentBinarySensor(AzureDevOpsTrackerPullRequestBinarySe
         pull_request = self.pull_request
         if pull_request is None:
             return {}
-        latest_comment = pull_request.latest_unseen_comment
+        latest_comment = pull_request.latest_new_comment
         return {
             "pull_request_title": pull_request.title,
             "pull_request_url": pull_request.url,
-            "unseen_comment_count": pull_request.unseen_comment_count,
+            "new_comment_count": pull_request.new_comment_count,
             "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
             "latest_comment_text": latest_comment.text if latest_comment else None,
             "latest_comment_timestamp": latest_comment.published_date if latest_comment else None,
