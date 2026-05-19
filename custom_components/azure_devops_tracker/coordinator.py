@@ -183,11 +183,31 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         current_user_id = current_user.id.casefold() if current_user.id else None
         current_user_name = current_user.unique_name.casefold() if current_user.unique_name else None
+        current_user_display_name = (
+            current_user.display_name.casefold() if current_user.display_name else None
+        )
+
+        _LOGGER.debug(
+            "Evaluating %s pull requests for project '%s' using current user %s",
+            len(pull_requests),
+            project.name,
+            current_user.as_dict(),
+        )
 
         for pr in pull_requests:
-            is_author = self._identity_matches(pr.author, current_user_id, current_user_name)
+            is_author = self._identity_matches(
+                pr.author,
+                current_user_id,
+                current_user_name,
+                current_user_display_name,
+            )
             is_reviewer = any(
-                self._identity_matches(reviewer, current_user_id, current_user_name)
+                self._identity_matches(
+                    reviewer,
+                    current_user_id,
+                    current_user_name,
+                    current_user_display_name,
+                )
                 for reviewer in pr.reviewers
             )
             if not is_author and not is_reviewer:
@@ -231,6 +251,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 )
 
             relevant_prs.append(pr)
+
+        _LOGGER.debug(
+            "Matched %s pull requests for current user in project '%s'",
+            len(relevant_prs),
+            project.name,
+        )
 
         return relevant_prs
 
@@ -337,11 +363,18 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         identity: IdentityInfo,
         current_user_id: str | None,
         current_user_name: str | None,
+        current_user_display_name: str | None,
     ) -> bool:
         """Return whether an identity matches the current user."""
         if identity.id and current_user_id and identity.id.casefold() == current_user_id:
             return True
         if identity.unique_name and current_user_name and identity.unique_name.casefold() == current_user_name:
+            return True
+        if (
+            identity.display_name
+            and current_user_display_name
+            and identity.display_name.casefold() == current_user_display_name
+        ):
             return True
         return False
 

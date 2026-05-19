@@ -14,6 +14,14 @@ class IdentityInfo:
     display_name: str | None
     unique_name: str | None
 
+    def as_dict(self) -> dict[str, Any]:
+        """Return the identity as a serializable dict."""
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "unique_name": self.unique_name,
+        }
+
 
 @dataclass(slots=True)
 class ProjectInfo:

@@ -152,10 +152,21 @@ def test_identity_matches_by_id_and_unique_name() -> None:
     """Identity matching should support both id and unique name fallbacks."""
     by_id = IdentityInfo(id="abc", display_name="Alex", unique_name=None)
     by_name = IdentityInfo(id=None, display_name="Alex", unique_name="alex@example.com")
+    by_display_name = IdentityInfo(id=None, display_name="Alex Lund", unique_name=None)
 
-    assert AzureDevOpsCoordinator._identity_matches(by_id, "abc", None) is True
-    assert AzureDevOpsCoordinator._identity_matches(by_name, None, "alex@example.com") is True
-    assert AzureDevOpsCoordinator._identity_matches(by_name, "other", "other@example.com") is False
+    assert AzureDevOpsCoordinator._identity_matches(by_id, "abc", None, None) is True
+    assert (
+        AzureDevOpsCoordinator._identity_matches(by_name, None, "alex@example.com", None)
+        is True
+    )
+    assert (
+        AzureDevOpsCoordinator._identity_matches(by_display_name, None, None, "alex lund")
+        is True
+    )
+    assert (
+        AzureDevOpsCoordinator._identity_matches(by_name, "other", "other@example.com", "other")
+        is False
+    )
 
 
 def test_get_pull_request_returns_matching_item() -> None:
