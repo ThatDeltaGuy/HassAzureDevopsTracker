@@ -124,9 +124,12 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             )
 
-        schema[
-            vol.Required(CONF_ORGANIZATION, default=self._organization_input)
-        ] = TextSelector()
+        organization_key: Any = (
+            vol.Optional(CONF_ORGANIZATION, default=self._organization_input)
+            if existing_entries
+            else vol.Required(CONF_ORGANIZATION, default=self._organization_input)
+        )
+        schema[organization_key] = TextSelector()
 
         if not existing_entries:
             schema[
