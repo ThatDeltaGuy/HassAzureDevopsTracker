@@ -46,6 +46,8 @@ from .const import (
 from .models import ProjectInfo
 from .options_flow import AzureDevOpsTrackerOptionsFlow
 
+CONF_REUSE_ENTRY = "reuse_entry"
+
 
 class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle Azure DevOps Tracker config flow."""
@@ -58,6 +60,54 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._pat: str | None = None
         self._projects: list[ProjectInfo] = []
 
+    def _existing_entries(self):
+        """Return existing integration entries."""
+        return list(self.hass.config_entries.async_entries(DOMAIN))
+
+    def _get_reuse_entry(self, entry_id: str | None):
+        """Return an existing entry selected for reuse."""
+        if not entry_id:
+            return None
+        for entry in self._existing_entries():
+            if entry.entry_id == entry_id:
+                return entry
+        return None
+
+    def _user_step_schema(self) -> vol.Schema:
+        """Build the first-step schema, including reuse options when available."""
+        existing_entries = self._existing_entries()
+        schema: dict[Any, Any] = {}
+
+        if existing_entries:
+            schema[
+                vol.Optional(CONF_REUSE_ENTRY)
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        {"value": entry.entry_id, "label": entry.title}
+                        for entry in existing_entries
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+
+        default_organization = self._organization
+        if default_organization is None and existing_entries:
+            default_organization = existing_entries[0].data.get(CONF_ORGANIZATION, "")
+
+        schema[
+            vol.Required(CONF_ORGANIZATION, default=default_organization or "")
+        ] = TextSelector()
+
+        pat_key: Any = (
+            vol.Optional(CONF_PAT)
+            if existing_entries
+            else vol.Required(CONF_PAT)
+        )
+        schema[pat_key] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
+        return vol.Schema(schema)
+
     def _get_project(self, project_id: str) -> ProjectInfo | None:
         """Return a configured project by id."""
         for project in self._projects:
@@ -69,21 +119,18 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 1: PAT and organization."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            reuse_entry = self._get_reuse_entry(user_input.get(CONF_REUSE_ENTRY))
             self._organization = user_input[CONF_ORGANIZATION].strip()
-            self._pat = user_input[CONF_PAT].strip()
+            entered_pat = user_input.get(CONF_PAT, "").strip()
+            self._pat = entered_pat or (
+                reuse_entry.data.get(CONF_PAT) if reuse_entry is not None else None
+            )
 
             if not self._organization or not self._pat:
                 errors["base"] = "required_field"
                 return self.async_show_form(
                     step_id="user",
-                    data_schema=vol.Schema(
-                        {
-                            vol.Required(CONF_ORGANIZATION, default=self._organization or ""): TextSelector(),
-                            vol.Required(CONF_PAT): TextSelector(
-                                TextSelectorConfig(type=TextSelectorType.PASSWORD)
-                            ),
-                        }
-                    ),
+                    data_schema=self._user_step_schema(),
                     errors=errors,
                 )
 
@@ -104,14 +151,7 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_ORGANIZATION, default=self._organization or ""): TextSelector(),
-                    vol.Required(CONF_PAT): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
-                    ),
-                }
-            ),
+            data_schema=self._user_step_schema(),
             errors=errors,
         )
 

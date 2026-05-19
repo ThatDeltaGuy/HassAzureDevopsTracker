@@ -33,11 +33,14 @@ def test_parse_identity_returns_basic_fields() -> None:
 def test_get_current_user_falls_back_to_connection_data() -> None:
     """Profile-host auth failures should fall back to connection data."""
 
+    calls = []
+
     class _FallbackClient(AzureDevOpsClient):
         def __init__(self) -> None:
             pass
 
         async def _request_json(self, method, url, *, params=None, json_data=None):
+            calls.append(url)
             if "profile/profiles/me" in url:
                 raise AzureDevOpsAuthError("Authentication failed")
             return {
@@ -53,3 +56,4 @@ def test_get_current_user_falls_back_to_connection_data() -> None:
     assert identity.id == "user-123"
     assert identity.display_name == "Alex Lund"
     assert identity.unique_name == "alex@example.com"
+    assert calls[1].endswith("/example-org/_apis/connectionData")
