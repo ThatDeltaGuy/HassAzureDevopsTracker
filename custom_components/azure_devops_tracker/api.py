@@ -9,6 +9,7 @@ import aiohttp
 
 from .const import (
     API_VERSION_BUILD,
+    API_VERSION_CONNECTION_DATA,
     API_VERSION_CORE,
     API_VERSION_GIT,
     API_VERSION_POLICY,
@@ -108,7 +109,7 @@ class AzureDevOpsClient:
                 "GET",
                 f"{BASE_URL}/{organization}/_apis/connectionData",
                 params={
-                    "api-version": API_VERSION_CORE,
+                    "api-version": API_VERSION_CONNECTION_DATA,
                     "connectOptions": "1",
                     "lastChangeId": "-1",
                     "lastChangeId64": "-1",
