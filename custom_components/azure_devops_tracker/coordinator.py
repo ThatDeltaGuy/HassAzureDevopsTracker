@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from datetime import timedelta
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -212,11 +213,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         pull_requests = await self.client.list_pull_requests(self.organization, project.name)
         relevant_prs: list[PullRequestInfo] = []
 
-        current_user_id = current_user.id.casefold() if current_user.id else None
-        current_user_name = current_user.unique_name.casefold() if current_user.unique_name else None
-        current_user_display_name = (
-            current_user.display_name.casefold() if current_user.display_name else None
-        )
+        current_user_aliases = self._identity_aliases(current_user)
 
         _LOGGER.debug(
             "Evaluating %s pull requests for project '%s' using current user %s",
@@ -228,16 +225,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         for pr in pull_requests:
             is_author = self._identity_matches(
                 pr.author,
-                current_user_id,
-                current_user_name,
-                current_user_display_name,
+                current_user_aliases,
             )
             is_reviewer = any(
                 self._identity_matches(
                     reviewer,
-                    current_user_id,
-                    current_user_name,
-                    current_user_display_name,
+                    current_user_aliases,
                 )
                 for reviewer in pr.reviewers
             )
@@ -294,6 +287,24 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
             len(relevant_prs),
             project.name,
         )
+
+        if pull_requests and not relevant_prs:
+            _LOGGER.warning(
+                "Azure DevOps returned %s active pull requests for project '%s' but none matched the resolved user identity. Current user=%s aliases=%s sample_prs=%s",
+                len(pull_requests),
+                project.name,
+                current_user.as_dict(),
+                sorted(current_user_aliases),
+                [
+                    {
+                        "pull_request_id": pr.pull_request_id,
+                        "author": pr.author.as_dict(),
+                        "author_aliases": sorted(self._identity_aliases(pr.author)),
+                        "reviewers": [reviewer.as_dict() for reviewer in pr.reviewers],
+                    }
+                    for pr in pull_requests[:5]
+                ],
+            )
 
         return relevant_prs
 
@@ -396,24 +407,41 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._initialized = True
 
     @staticmethod
+    def _normalize_identity_value(value: str | None) -> str | None:
+        """Normalize an identity string to improve matching across ADO endpoints."""
+        if not value:
+            return None
+        normalized = value.casefold().strip()
+        if "\\" in normalized:
+            normalized = normalized.split("\\")[-1]
+        if "@" in normalized:
+            local_part = normalized.split("@", 1)[0]
+            compact_local_part = re.sub(r"[^a-z0-9]", "", local_part)
+            if compact_local_part:
+                return compact_local_part
+        compact = re.sub(r"[^a-z0-9]", "", normalized)
+        return compact or None
+
+    @classmethod
+    def _identity_aliases(cls, identity: IdentityInfo) -> set[str]:
+        """Return all normalized aliases for an identity."""
+        aliases = set()
+        for value in (identity.id, identity.unique_name, identity.display_name):
+            normalized = cls._normalize_identity_value(value)
+            if normalized:
+                aliases.add(normalized)
+        return aliases
+
+    @classmethod
     def _identity_matches(
+        cls,
         identity: IdentityInfo,
-        current_user_id: str | None,
-        current_user_name: str | None,
-        current_user_display_name: str | None,
+        current_user_aliases: set[str],
     ) -> bool:
         """Return whether an identity matches the current user."""
-        if identity.id and current_user_id and identity.id.casefold() == current_user_id:
-            return True
-        if identity.unique_name and current_user_name and identity.unique_name.casefold() == current_user_name:
-            return True
-        if (
-            identity.display_name
-            and current_user_display_name
-            and identity.display_name.casefold() == current_user_display_name
-        ):
-            return True
-        return False
+        if not current_user_aliases:
+            return False
+        return bool(cls._identity_aliases(identity) & current_user_aliases)
 
     @property
     def pull_requests_with_new_comments(self) -> list[PullRequestInfo]:

@@ -153,18 +153,23 @@ def test_identity_matches_by_id_and_unique_name() -> None:
     by_id = IdentityInfo(id="abc", display_name="Alex", unique_name=None)
     by_name = IdentityInfo(id=None, display_name="Alex", unique_name="alex@example.com")
     by_display_name = IdentityInfo(id=None, display_name="Alex Lund", unique_name=None)
+    by_email_alias = IdentityInfo(id=None, display_name=None, unique_name="alex.lund@eatechnology.com")
 
-    assert AzureDevOpsCoordinator._identity_matches(by_id, "abc", None, None) is True
+    assert AzureDevOpsCoordinator._identity_matches(by_id, {"abc"}) is True
     assert (
-        AzureDevOpsCoordinator._identity_matches(by_name, None, "alex@example.com", None)
+        AzureDevOpsCoordinator._identity_matches(by_name, {"alex"})
         is True
     )
     assert (
-        AzureDevOpsCoordinator._identity_matches(by_display_name, None, None, "alex lund")
+        AzureDevOpsCoordinator._identity_matches(by_display_name, {"alexlund"})
         is True
     )
     assert (
-        AzureDevOpsCoordinator._identity_matches(by_name, "other", "other@example.com", "other")
+        AzureDevOpsCoordinator._identity_matches(by_email_alias, {"alexlund"})
+        is True
+    )
+    assert (
+        AzureDevOpsCoordinator._identity_matches(by_name, {"other"})
         is False
     )
 
