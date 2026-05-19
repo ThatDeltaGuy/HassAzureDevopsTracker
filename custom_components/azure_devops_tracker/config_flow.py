@@ -64,6 +64,7 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._selected_existing_organization: str = ""
         self._selected_reuse_entry: str = ""
         self._pat_input: str = ""
+        self._organization_from_existing = False
 
     def _existing_entries(self):
         """Return existing integration entries."""
@@ -99,7 +100,8 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         return None
 
     def _user_step_schema(self) -> vol.Schema:
-        """Build the organization selection schema."""
+        """Build the first setup step schema."""
+        existing_entries = self._existing_entries()
         existing_organizations = self._existing_organizations()
         schema: dict[Any, Any] = {}
 
@@ -126,6 +128,11 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_ORGANIZATION, default=self._organization_input)
         ] = TextSelector()
 
+        if not existing_entries:
+            schema[
+                vol.Required(CONF_PAT, default=self._pat_input)
+            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
         return vol.Schema(schema)
 
     def _credentials_step_schema(self) -> vol.Schema:
@@ -139,23 +146,24 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             self._selected_reuse_entry = ""
 
         schema: dict[Any, Any] = {}
-        schema[
-            vol.Optional(
-                CONF_REUSE_PERSONAL_ACCESS_TOKEN,
-                default=self._selected_reuse_entry or "",
+        if self._organization_from_existing:
+            schema[
+                vol.Optional(
+                    CONF_REUSE_PERSONAL_ACCESS_TOKEN,
+                    default=self._selected_reuse_entry or "",
+                )
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        {"value": "", "label": ""},
+                    ]
+                    + [
+                        {"value": entry.entry_id, "label": entry.title}
+                        for entry in filtered_entries
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
             )
-        ] = SelectSelector(
-            SelectSelectorConfig(
-                options=[
-                    {"value": "", "label": ""},
-                ]
-                + [
-                    {"value": entry.entry_id, "label": entry.title}
-                    for entry in filtered_entries
-                ],
-                mode=SelectSelectorMode.DROPDOWN,
-            )
-        )
         schema[
             vol.Optional(CONF_PAT, default=self._pat_input)
         ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
@@ -169,14 +177,16 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         return None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Step 1: organization selection."""
+        """Step 1: organization selection, or full setup when no entries exist."""
         errors: dict[str, str] = {}
+        existing_entries = self._existing_entries()
         if user_input is not None:
             selected_organization = user_input.get(CONF_EXISTING_ORGANIZATION, "").strip()
             entered_organization = user_input.get(CONF_ORGANIZATION, "").strip()
 
             self._selected_existing_organization = selected_organization
-            self._organization_input = entered_organization or selected_organization or ""
+            self._organization_from_existing = bool(selected_organization and not entered_organization)
+            self._organization_input = entered_organization
             self._organization = entered_organization or selected_organization or None
 
             self._selected_reuse_entry = ""
@@ -185,6 +195,39 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
 
             if not self._organization:
                 errors["base"] = "required_field"
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._user_step_schema(),
+                    errors=errors,
+                )
+
+            if not existing_entries:
+                entered_pat = user_input.get(CONF_PAT, "").strip()
+                self._pat_input = entered_pat
+                self._pat = entered_pat or None
+                if not self._pat:
+                    errors["base"] = "required_field"
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=self._user_step_schema(),
+                        errors=errors,
+                    )
+
+                client = AzureDevOpsClient(async_get_clientsession(self.hass), self._pat)
+                try:
+                    await client.validate_organization(self._organization)
+                    self._projects = await client.list_projects(self._organization)
+                except AzureDevOpsAuthError:
+                    errors["base"] = "invalid_auth"
+                except Exception:
+                    errors["base"] = "cannot_connect"
+
+                if not errors and not self._projects:
+                    errors["base"] = "no_projects"
+
+                if not errors:
+                    return await self.async_step_project()
+
                 return self.async_show_form(
                     step_id="user",
                     data_schema=self._user_step_schema(),

@@ -163,6 +163,7 @@ def test_user_step_reuses_pat_from_existing_entry(monkeypatch) -> None:
         config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
     )
     flow._organization = "org-one"
+    flow._organization_from_existing = True
 
     result = asyncio.run(
         flow.async_step_credentials(
@@ -200,8 +201,6 @@ def test_user_step_does_not_prefill_organization_from_existing_entry() -> None:
 
 def test_user_step_uses_existing_organization_when_text_input_blank(monkeypatch) -> None:
     """Selecting an existing organization should advance to the credentials step."""
-    monkeypatch.setattr(config_flow_module, "AzureDevOpsClient", _FakeClient)
-
     existing_entry = SimpleNamespace(
         entry_id="entry-1",
         title="org-one/Project One",
@@ -249,7 +248,8 @@ def test_selecting_existing_organization_prefills_organization_input() -> None:
     )
 
     assert result["step_id"] == "credentials"
-    assert flow._organization_input == "org-one"
+    assert flow._organization == "org-one"
+    assert flow._organization_from_existing is True
 
 
 def test_selecting_reuse_entry_prefills_pat_placeholder(monkeypatch) -> None:
@@ -266,6 +266,7 @@ def test_selecting_reuse_entry_prefills_pat_placeholder(monkeypatch) -> None:
         config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
     )
     flow._organization = "org-one"
+    flow._organization_from_existing = True
 
     result = asyncio.run(
         flow.async_step_credentials(
@@ -299,6 +300,7 @@ def test_reuse_credentials_options_are_filtered_by_selected_organization() -> No
         config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
     )
     flow._organization = "org-one"
+    flow._organization_from_existing = True
 
     schema = flow._credentials_step_schema()
     reuse_key = next(
@@ -330,6 +332,7 @@ def test_reuse_credentials_options_are_empty_without_organization_context() -> N
         config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
     )
 
+    flow._organization_from_existing = True
     schema = flow._credentials_step_schema()
     reuse_key = next(
         key
@@ -422,6 +425,7 @@ def test_clearing_reuse_credentials_only_clears_pat_input() -> None:
         config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
     )
     flow._organization = "org-one"
+    flow._organization_from_existing = True
     flow._selected_reuse_entry = "entry-1"
     flow._pat_input = "typed-pat"
 
@@ -438,6 +442,52 @@ def test_clearing_reuse_credentials_only_clears_pat_input() -> None:
     assert flow._organization == "org-one"
     assert flow._selected_reuse_entry == ""
     assert flow._pat_input == ""
+
+
+def test_manual_organization_hides_reuse_dropdown_on_credentials_step() -> None:
+    """Manually entered organizations should not offer PAT reuse dropdown options."""
+    existing_entries = [
+        SimpleNamespace(
+            entry_id="entry-1",
+            title="org-one/Project One",
+            data={CONF_ORGANIZATION: "org-one", CONF_PAT: "pat-1"},
+        )
+    ]
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: existing_entries)
+    )
+    flow._organization = "org-manual"
+    flow._organization_from_existing = False
+
+    schema = flow._credentials_step_schema()
+
+    assert all(
+        getattr(key, "schema", None) != config_flow_module.CONF_REUSE_PERSONAL_ACCESS_TOKEN
+        for key in schema.schema
+    )
+
+
+def test_first_entry_uses_single_step_with_pat(monkeypatch) -> None:
+    """When no entries exist, the first step should accept PAT directly."""
+    monkeypatch.setattr(config_flow_module, "AzureDevOpsClient", _FakeClient)
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [])
+    )
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                CONF_ORGANIZATION: "org-one",
+                CONF_PAT: "first-pat",
+            }
+        )
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "project"
+    assert flow._pat == "first-pat"
 
 
 def test_clearing_organization_context_clears_reuse_and_pat_input() -> None:

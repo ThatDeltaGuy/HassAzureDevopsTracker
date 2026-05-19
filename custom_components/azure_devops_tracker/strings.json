@@ -14,7 +14,7 @@
     "step": {
       "user": {
         "title": "Connect to Azure DevOps",
-        "description": "Enter an organization manually or select one from the existing organizations list.",
+        "description": "If no Azure DevOps Tracker entries exist yet, enter the organization and PAT here. If entries already exist, choose or enter the organization first and the next step will handle PAT selection.",
         "data": {
           "organization": "Organization",
           "existing_organization": "Existing Organizations"
@@ -22,7 +22,7 @@
       },
       "credentials": {
         "title": "Choose credentials",
-        "description": "Choose an existing PAT for this organization or enter a new one.",
+        "description": "Choose an existing PAT for this organization or enter a new organization-scoped PAT.",
         "data": {
           "reuse_personal_access_token": "Reuse Credentials",
           "personal_access_token": "Personal access token"
