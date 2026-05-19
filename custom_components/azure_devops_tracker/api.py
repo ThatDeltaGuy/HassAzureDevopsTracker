@@ -68,7 +68,11 @@ class AzureDevOpsClient:
                 raise AzureDevOpsAuthError("Authentication failed")
             if response.status >= 400:
                 body = await response.text()
-                raise AzureDevOpsApiError(f"Azure DevOps request failed: {response.status} {body}")
+                body_preview = " ".join(body.split())[:200] if body else ""
+                raise AzureDevOpsApiError(
+                    f"Azure DevOps request failed: {response.status} for {url}"
+                    f"{f' - {body_preview}' if body_preview else ''}"
+                )
 
             data = await response.json(content_type=None)
             if not isinstance(data, dict):
@@ -83,7 +87,7 @@ class AzureDevOpsClient:
             params={"api-version": API_VERSION_CORE, "$top": 1},
         )
 
-    async def get_current_user(self) -> IdentityInfo:
+    async def get_current_user(self, organization: str) -> IdentityInfo:
         """Return the signed-in profile."""
         try:
             data = await self._request_json(
@@ -102,7 +106,7 @@ class AzureDevOpsClient:
             # can still load instead of failing the whole config entry.
             data = await self._request_json(
                 "GET",
-                f"{BASE_URL}/_apis/connectionData",
+                f"{BASE_URL}/{organization}/_apis/connectionData",
                 params={
                     "api-version": API_VERSION_CORE,
                     "connectOptions": "1",

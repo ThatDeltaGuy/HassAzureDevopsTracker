@@ -48,7 +48,7 @@ def test_get_current_user_falls_back_to_connection_data() -> None:
                 }
             }
 
-    identity = asyncio.run(_FallbackClient().get_current_user())
+    identity = asyncio.run(_FallbackClient().get_current_user("example-org"))
 
     assert identity.id == "user-123"
     assert identity.display_name == "Alex Lund"

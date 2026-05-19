@@ -133,7 +133,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch a full project snapshot."""
         try:
-            current_user = await self.client.get_current_user()
+            current_user = await self.client.get_current_user(self.organization)
             project = await self._resolve_project()
 
             pipelines = await self.client.list_pipelines(self.organization, project.name) if self.enable_builds else []
