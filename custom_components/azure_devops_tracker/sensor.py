@@ -24,6 +24,7 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         OpenPullRequestCountSensor(coordinator),
         ReadyPullRequestCountSensor(coordinator),
+        PullRequestsWithActiveCommentsSensor(coordinator),
         PullRequestsWithNewCommentsSensor(coordinator),
         FailedBuildCountSensor(coordinator),
         ActiveWorkItemCountSensor(coordinator),
@@ -123,6 +124,25 @@ class PullRequestsWithNewCommentsSensor(AzureDevOpsTrackerSensor):
             "latest_comment_timestamp": latest_comment.published_date if latest_comment else None,
             "latest_comment_thread_id": latest_comment.thread_id if latest_comment else None,
             "latest_comment_url": latest_comment.url if latest_comment else None,
+        }
+
+
+class PullRequestsWithActiveCommentsSensor(AzureDevOpsTrackerSensor):
+    _attr_name = "Pull requests with active comments"
+    _attr_icon = "mdi:comment-processing"
+
+    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.project.id}_pull_requests_with_active_comments"
+
+    @property
+    def native_value(self) -> StateType:
+        return len(self.coordinator.pull_requests_with_active_comments)
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any]:
+        return {
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.pull_requests_with_active_comments],
         }
 
 

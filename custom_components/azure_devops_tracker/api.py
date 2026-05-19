@@ -304,6 +304,7 @@ class AzureDevOpsClient:
         comments: list[CommentInfo] = []
         for thread in data.get("value", []):
             thread_id = thread.get("id")
+            thread_status = thread.get("status")
             thread_context = thread.get("threadContext") or {}
             file_path = thread_context.get("filePath")
             for comment in thread.get("comments", []):
@@ -319,6 +320,7 @@ class AzureDevOpsClient:
                         is_reply=bool(comment.get("parentCommentId")),
                         comment_type=comment.get("commentType"),
                         is_deleted=comment.get("isDeleted", False),
+                        thread_status=thread_status,
                     )
                 )
         _LOGGER.debug(

@@ -257,6 +257,9 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     bootstrap=not self._initialized,
                     pr_key=str(pr.pull_request_id),
                 )
+                pr.active_comments = self._active_comments(comments)
+                pr.active_comment_count = len(pr.active_comments)
+                pr.has_active_comments = pr.active_comment_count > 0
                 pr.has_new_comment = pr.latest_unseen_comment is not None
 
             if self.enable_pr_policies:
@@ -350,6 +353,18 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._seen_state.setdefault("comments", {})[pr_key] = sorted(persisted_seen)
         latest_unseen = unseen_comments[-1] if unseen_comments else None
         return latest_comment, latest_unseen, len(unseen_comments)
+
+    @staticmethod
+    def _active_comments(comments: list[CommentInfo]) -> list[CommentInfo]:
+        """Return user comments belonging to active discussion threads."""
+        return [
+            comment
+            for comment in comments
+            if not comment.is_deleted
+            and comment.comment_type == HUMAN_COMMENT_TYPE
+            and comment.thread_status == "active"
+            and comment.text
+        ]
 
     async def _process_transitions(self, data: CoordinatorData) -> None:
         """Persist seen state and emit transition events."""
@@ -451,6 +466,10 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
     @property
     def ready_pull_requests(self) -> list[PullRequestInfo]:
         return [pr for pr in self.data.pull_requests if pr.ready_to_complete]
+
+    @property
+    def pull_requests_with_active_comments(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.data.pull_requests if pr.has_active_comments]
 
     @property
     def failed_builds(self) -> list[Any]:

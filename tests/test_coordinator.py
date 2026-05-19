@@ -244,3 +244,40 @@ def test_process_transitions_emits_expected_events() -> None:
     assert coordinator.store.saved is not None
     assert coordinator._seen_state["pr_build_failed"]["77"] is True
     assert coordinator._seen_state["pr_ready"]["77"] is True
+
+
+def test_active_comments_only_include_text_comments_from_active_threads() -> None:
+    """Active comments should exclude fixed/system/deleted thread comments."""
+    active_text = _comment(
+        20,
+        author_id="reviewer-1",
+        author_name="Reviewer",
+        text="Please revisit this logic.",
+        published_date="2026-05-18T12:00:00Z",
+    )
+    active_text.thread_status = "active"
+
+    fixed_text = _comment(
+        21,
+        author_id="reviewer-2",
+        author_name="Reviewer Two",
+        text="This was already addressed.",
+        published_date="2026-05-18T12:05:00Z",
+    )
+    fixed_text.thread_status = "fixed"
+
+    system_active = _comment(
+        22,
+        author_id="svc",
+        author_name="System",
+        text="Merge status changed",
+        published_date="2026-05-18T12:10:00Z",
+        comment_type="system",
+    )
+    system_active.thread_status = "active"
+
+    active_comments = AzureDevOpsCoordinator._active_comments(
+        [active_text, fixed_text, system_active]
+    )
+
+    assert active_comments == [active_text]

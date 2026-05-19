@@ -49,6 +49,7 @@ class CommentInfo:
     is_reply: bool
     comment_type: str | None = None
     is_deleted: bool = False
+    thread_status: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return the comment as a serializable dict."""
@@ -65,6 +66,7 @@ class CommentInfo:
             "is_reply": self.is_reply,
             "comment_type": self.comment_type,
             "is_deleted": self.is_deleted,
+            "thread_status": self.thread_status,
         }
 
 
@@ -107,6 +109,9 @@ class PullRequestInfo:
     policies: list[PolicyInfo] = field(default_factory=list)
     latest_comment: CommentInfo | None = None
     latest_unseen_comment: CommentInfo | None = None
+    active_comments: list[CommentInfo] = field(default_factory=list)
+    active_comment_count: int = 0
+    has_active_comments: bool = False
     unseen_comment_count: int = 0
     has_new_comment: bool = False
     build_failed: bool = False
@@ -143,6 +148,9 @@ class PullRequestInfo:
             "latest_unseen_comment": self.latest_unseen_comment.as_dict()
             if self.latest_unseen_comment
             else None,
+            "active_comments": [comment.as_dict() for comment in self.active_comments],
+            "active_comment_count": self.active_comment_count,
+            "has_active_comments": self.has_active_comments,
             "unseen_comment_count": self.unseen_comment_count,
             "has_new_comment": self.has_new_comment,
             "build_failed": self.build_failed,

@@ -6,9 +6,11 @@ from types import SimpleNamespace
 import asyncio
 
 from custom_components.azure_devops_tracker.binary_sensor import (
+    HasActiveCommentsBinarySensor,
     HasFailedBuildBinarySensor,
     HasNewCommentBinarySensor,
     HasReadyPullRequestBinarySensor,
+    PullRequestHasActiveCommentsBinarySensor,
     PullRequestBuildFailedBinarySensor,
     PullRequestHasNewCommentBinarySensor,
     PullRequestReadyToCompleteBinarySensor,
@@ -17,6 +19,7 @@ from custom_components.azure_devops_tracker.binary_sensor import (
 from custom_components.azure_devops_tracker.models import CommentInfo, IdentityInfo, PolicyInfo, PullRequestInfo
 from custom_components.azure_devops_tracker.event import AzureDevOpsTrackerProjectEvent
 from custom_components.azure_devops_tracker.sensor import (
+    PullRequestsWithActiveCommentsSensor,
     PullRequestStateSensor,
     PullRequestUnseenCommentCountSensor,
     async_setup_entry as async_setup_sensor_entry,
@@ -106,6 +109,9 @@ def _pull_request() -> PullRequestInfo:
         author=IdentityInfo(id="author-1", display_name="Author", unique_name="author@example.com"),
         latest_comment=latest_comment,
         latest_unseen_comment=latest_comment,
+        active_comments=[latest_comment],
+        active_comment_count=1,
+        has_active_comments=True,
         unseen_comment_count=2,
         has_new_comment=True,
         build_failed=True,
@@ -142,15 +148,34 @@ def test_pull_request_binary_sensors_reflect_flags() -> None:
     coordinator = _coordinator_for_pull_request(pull_request)
 
     new_comment = PullRequestHasNewCommentBinarySensor(coordinator, pull_request.pull_request_id)
+    active_comments = PullRequestHasActiveCommentsBinarySensor(coordinator, pull_request.pull_request_id)
     build_failed = PullRequestBuildFailedBinarySensor(coordinator, pull_request.pull_request_id)
     ready = PullRequestReadyToCompleteBinarySensor(coordinator, pull_request.pull_request_id)
 
     assert new_comment.is_on is True
     assert new_comment.extra_state_attributes["latest_comment_text"] == "Please update the null handling."
+    assert active_comments.is_on is True
+    assert active_comments.extra_state_attributes["active_comment_count"] == 1
+    assert active_comments.extra_state_attributes["active_comments"][0]["text"] == "Please update the null handling."
     assert build_failed.is_on is True
     assert build_failed.extra_state_attributes["policies"][0]["display_name"] == "Build policy"
     assert ready.is_on is True
     assert ready.extra_state_attributes["source_ref_name"] == "refs/heads/feature/null-response"
+
+
+def test_aggregate_active_comments_entities_reflect_matching_prs() -> None:
+    """Aggregate active-comment entities should count PRs with active comments."""
+    pull_request = _pull_request()
+    coordinator = _DynamicCoordinator([pull_request])
+    coordinator.pull_requests_with_active_comments = [pull_request]
+
+    sensor = PullRequestsWithActiveCommentsSensor(coordinator)
+    binary_sensor = HasActiveCommentsBinarySensor(coordinator)
+
+    assert sensor.native_value == 1
+    assert sensor.extra_state_attributes["pull_requests"][0]["has_active_comments"] is True
+    assert binary_sensor.is_on is True
+    assert binary_sensor.extra_state_attributes["pull_request_count"] == 1
 
 
 def test_dynamic_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:
@@ -164,6 +189,7 @@ def test_dynamic_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:
 
     entity_names = {entity.name for entity in added_entities}
     assert "Open pull requests" in entity_names
+    assert "Pull requests with active comments" in entity_names
     assert "PR 23 state" in entity_names
     assert "PR 23 unseen comments" in entity_names
 
@@ -179,7 +205,9 @@ def test_dynamic_binary_sensor_setup_adds_aggregate_and_per_pr_entities() -> Non
 
     entity_names = {entity.name for entity in added_entities}
     assert "Has new comment" in entity_names
+    assert "Has active comments" in entity_names
     assert "PR 23 has new comment" in entity_names
+    assert "PR 23 has active comments" in entity_names
     assert "PR 23 build failed" in entity_names
     assert "PR 23 ready to complete" in entity_names
 
