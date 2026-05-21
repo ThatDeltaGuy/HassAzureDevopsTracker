@@ -105,6 +105,8 @@ class PullRequestInfo:
     repository_id: str | None
     repository_name: str | None
     author: IdentityInfo
+    is_authored_by_current_user: bool = False
+    is_reviewed_by_current_user: bool = False
     reviewers: list[IdentityInfo] = field(default_factory=list)
     policies: list[PolicyInfo] = field(default_factory=list)
     latest_comment: CommentInfo | None = None
@@ -133,6 +135,8 @@ class PullRequestInfo:
             "repository_name": self.repository_name,
             "author_name": self.author.display_name,
             "author_unique_name": self.author.unique_name,
+            "is_authored_by_current_user": self.is_authored_by_current_user,
+            "is_reviewed_by_current_user": self.is_reviewed_by_current_user,
             "reviewers": [
                 {
                     "id": reviewer.id,

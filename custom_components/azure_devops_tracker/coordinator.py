@@ -245,6 +245,9 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 )
                 continue
 
+            pr.is_authored_by_current_user = is_author
+            pr.is_reviewed_by_current_user = is_reviewer and not is_author
+
             if self.enable_pr_comments and pr.repository_id:
                 comments = await self.client.list_pull_request_comments(
                     self.organization,
@@ -445,7 +448,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         for pr in data.pull_requests:
             pr_key = str(pr.pull_request_id)
-            if self._initialized and pr.latest_new_comment is not None:
+            if self._initialized and pr.is_authored_by_current_user and pr.latest_new_comment is not None:
                 payload = {
                     "organization": data.organization,
                     "project_id": data.project.id,
@@ -459,7 +462,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 }
                 self._dispatch_event(EVENT_NEW_PR_COMMENT, payload)
 
-            if self._initialized and not previous_build_failures.get(pr_key, False) and pr.build_failed:
+            if (
+                self._initialized
+                and pr.is_authored_by_current_user
+                and not previous_build_failures.get(pr_key, False)
+                and pr.build_failed
+            ):
                 self._dispatch_event(
                     EVENT_PR_BUILD_FAILED,
                     {
@@ -473,7 +481,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     },
                 )
 
-            if self._initialized and not previous_ready.get(pr_key, False) and pr.ready_to_complete:
+            if (
+                self._initialized
+                and pr.is_authored_by_current_user
+                and not previous_ready.get(pr_key, False)
+                and pr.ready_to_complete
+            ):
                 self._dispatch_event(
                     EVENT_PR_READY_TO_COMPLETE,
                     {
@@ -536,6 +549,38 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return [pr for pr in self.data.pull_requests if pr.has_new_comment]
 
     @property
+    def authored_pull_requests(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.data.pull_requests if pr.is_authored_by_current_user]
+
+    @property
+    def reviewed_pull_requests(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.data.pull_requests if pr.is_reviewed_by_current_user]
+
+    @property
+    def authored_ready_pull_requests(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.authored_pull_requests if pr.ready_to_complete]
+
+    @property
+    def reviewed_ready_pull_requests(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.reviewed_pull_requests if pr.ready_to_complete]
+
+    @property
+    def authored_pull_requests_with_new_comments(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.authored_pull_requests if pr.has_new_comment]
+
+    @property
+    def reviewed_pull_requests_with_new_comments(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.reviewed_pull_requests if pr.has_new_comment]
+
+    @property
+    def authored_pull_requests_with_active_comments(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.authored_pull_requests if pr.has_active_comments]
+
+    @property
+    def reviewed_pull_requests_with_active_comments(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.reviewed_pull_requests if pr.has_active_comments]
+
+    @property
     def ready_pull_requests(self) -> list[PullRequestInfo]:
         return [pr for pr in self.data.pull_requests if pr.ready_to_complete]
 
@@ -558,7 +603,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return dict(counts)
 
     @property
-    def latest_unseen_comment(self) -> CommentInfo | None:
+    def latest_new_comment(self) -> CommentInfo | None:
         comments = [pr.latest_new_comment for pr in self.pull_requests_with_new_comments if pr.latest_new_comment]
         if not comments:
             return None

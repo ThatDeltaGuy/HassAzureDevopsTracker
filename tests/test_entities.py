@@ -10,18 +10,13 @@ from custom_components.azure_devops_tracker.binary_sensor import (
     HasFailedBuildBinarySensor,
     HasNewCommentBinarySensor,
     HasReadyPullRequestBinarySensor,
-    PullRequestHasActiveCommentsBinarySensor,
-    PullRequestBuildFailedBinarySensor,
-    PullRequestHasNewCommentBinarySensor,
-    PullRequestReadyToCompleteBinarySensor,
     async_setup_entry as async_setup_binary_entry,
 )
 from custom_components.azure_devops_tracker.models import CommentInfo, IdentityInfo, PolicyInfo, PullRequestInfo
 from custom_components.azure_devops_tracker.event import AzureDevOpsTrackerProjectEvent
 from custom_components.azure_devops_tracker.sensor import (
-    PullRequestsWithActiveCommentsSensor,
-    PullRequestNewCommentCountSensor,
-    PullRequestStateSensor,
+    AuthoredOpenPullRequestsSensor,
+    ReviewedOpenPullRequestsSensor,
     async_setup_entry as async_setup_sensor_entry,
 )
 
@@ -36,21 +31,25 @@ def _coordinator_for_pull_request(pull_request: PullRequestInfo):
 
 class _DynamicCoordinator(SimpleNamespace):
     def __init__(self, pull_requests):
+        authored = [pr for pr in pull_requests if pr.is_authored_by_current_user]
+        reviewed = [pr for pr in pull_requests if pr.is_reviewed_by_current_user]
         super().__init__(
             organization="org",
             project=SimpleNamespace(id="project-1", name="Project One"),
             data=SimpleNamespace(pull_requests=pull_requests),
+            authored_pull_requests=authored,
+            reviewed_pull_requests=reviewed,
             pull_requests_with_new_comments=[pr for pr in pull_requests if pr.has_new_comment],
-            ready_pull_requests=[pr for pr in pull_requests if pr.ready_to_complete],
+            authored_pull_requests_with_new_comments=[pr for pr in authored if pr.has_new_comment],
+            authored_pull_requests_with_active_comments=[pr for pr in authored if pr.has_active_comments],
+            authored_ready_pull_requests=[pr for pr in authored if pr.ready_to_complete],
+            reviewed_ready_pull_requests=[pr for pr in reviewed if pr.ready_to_complete],
             failed_builds=[],
             work_items_by_type={},
             work_items_by_state={},
-            latest_unseen_comment=(pull_requests[0].latest_new_comment if pull_requests else None),
+            latest_new_comment=(pull_requests[0].latest_new_comment if pull_requests else None),
             async_add_listener=self.async_add_listener,
             async_add_event_listener=self.async_add_event_listener,
-            get_pull_request=lambda pull_request_id: next(
-                (pr for pr in self.data.pull_requests if pr.pull_request_id == pull_request_id), None
-            ),
         )
         self._listeners = []
         self._event_listeners = []
@@ -107,6 +106,8 @@ def _pull_request() -> PullRequestInfo:
         repository_id="repo-1",
         repository_name="Main Repo",
         author=IdentityInfo(id="author-1", display_name="Author", unique_name="author@example.com"),
+        is_authored_by_current_user=True,
+        is_reviewed_by_current_user=False,
         latest_comment=latest_comment,
         latest_new_comment=latest_comment,
         active_comments=[latest_comment],
@@ -120,66 +121,67 @@ def _pull_request() -> PullRequestInfo:
     )
 
 
-def test_pull_request_state_sensor_exposes_pr_details() -> None:
-    """Per-PR state sensor should reflect the live PR model."""
+def test_authored_open_pull_requests_sensor_exposes_pr_details() -> None:
+    """Aggregate authored PR sensor should expose structured PR details."""
     pull_request = _pull_request()
-    sensor = PullRequestStateSensor(_coordinator_for_pull_request(pull_request), pull_request.pull_request_id)
+    sensor = AuthoredOpenPullRequestsSensor(_DynamicCoordinator([pull_request]))
 
-    assert sensor.name == "PR 23 state"
-    assert sensor.native_value == "active"
-    assert sensor.extra_state_attributes["title"] == "Handle null response path"
-    assert sensor.extra_state_attributes["latest_comment_text"] == "Please update the null handling."
+    assert sensor.native_value == 1
+    assert sensor.extra_state_attributes["pull_requests"][0]["title"] == "Handle null response path"
+    assert sensor.extra_state_attributes["new_comment_count"] == 2
 
 
-def test_pull_request_new_comment_sensor_exposes_latest_comment() -> None:
-    """Per-PR new comment sensor should expose comment details."""
+def test_reviewed_open_pull_requests_sensor_exposes_reviewed_items_only() -> None:
+    """Reviewed PR sensor should exclude authored PRs."""
+    authored = _pull_request()
+    reviewed = _pull_request()
+    reviewed.pull_request_id = 99
+    reviewed.is_authored_by_current_user = False
+    reviewed.is_reviewed_by_current_user = True
+    reviewed.title = "Reviewed PR"
+
+    sensor = ReviewedOpenPullRequestsSensor(_DynamicCoordinator([authored, reviewed]))
+
+    assert sensor.native_value == 1
+    assert sensor.extra_state_attributes["pull_requests"][0]["pull_request_id"] == 99
+
+
+def test_aggregate_binary_sensors_reflect_authored_flags() -> None:
+    """Aggregate binary sensors should mirror authored PR state and expose useful attributes."""
     pull_request = _pull_request()
-    sensor = PullRequestNewCommentCountSensor(_coordinator_for_pull_request(pull_request), pull_request.pull_request_id)
+    coordinator = _DynamicCoordinator([pull_request])
 
-    assert sensor.name == "PR 23 new comments"
-    assert sensor.native_value == 2
-    assert sensor.extra_state_attributes["latest_comment_author"] == "Reviewer"
-    assert sensor.extra_state_attributes["latest_comment_file_path"] == "/src/service.cs"
-
-
-def test_pull_request_binary_sensors_reflect_flags() -> None:
-    """Per-PR binary sensors should mirror the PR flags and expose useful attributes."""
-    pull_request = _pull_request()
-    coordinator = _coordinator_for_pull_request(pull_request)
-
-    new_comment = PullRequestHasNewCommentBinarySensor(coordinator, pull_request.pull_request_id)
-    active_comments = PullRequestHasActiveCommentsBinarySensor(coordinator, pull_request.pull_request_id)
-    build_failed = PullRequestBuildFailedBinarySensor(coordinator, pull_request.pull_request_id)
-    ready = PullRequestReadyToCompleteBinarySensor(coordinator, pull_request.pull_request_id)
+    new_comment = HasNewCommentBinarySensor(coordinator)
+    active_comments = HasActiveCommentsBinarySensor(coordinator)
+    build_failed = HasFailedBuildBinarySensor(coordinator)
+    ready = HasReadyPullRequestBinarySensor(coordinator)
 
     assert new_comment.is_on is True
     assert new_comment.extra_state_attributes["latest_comment_text"] == "Please update the null handling."
     assert active_comments.is_on is True
-    assert active_comments.extra_state_attributes["active_comment_count"] == 1
-    assert active_comments.extra_state_attributes["active_comments"][0]["text"] == "Please update the null handling."
-    assert build_failed.is_on is True
-    assert build_failed.extra_state_attributes["policies"][0]["display_name"] == "Build policy"
+    assert active_comments.extra_state_attributes["pull_request_count"] == 1
+    assert build_failed.is_on is False
     assert ready.is_on is True
-    assert ready.extra_state_attributes["source_ref_name"] == "refs/heads/feature/null-response"
+    assert ready.extra_state_attributes["pull_requests"][0]["source_ref_name"] == "refs/heads/feature/null-response"
 
 
 def test_aggregate_active_comments_entities_reflect_matching_prs() -> None:
-    """Aggregate active-comment entities should count PRs with active comments."""
+    """Aggregate authored sensor should expose active-comment details."""
     pull_request = _pull_request()
     coordinator = _DynamicCoordinator([pull_request])
-    coordinator.pull_requests_with_active_comments = [pull_request]
 
-    sensor = PullRequestsWithActiveCommentsSensor(coordinator)
+    sensor = AuthoredOpenPullRequestsSensor(coordinator)
     binary_sensor = HasActiveCommentsBinarySensor(coordinator)
 
     assert sensor.native_value == 1
     assert sensor.extra_state_attributes["pull_requests"][0]["has_active_comments"] is True
+    assert sensor.extra_state_attributes["active_comment_count"] == 1
     assert binary_sensor.is_on is True
     assert binary_sensor.extra_state_attributes["pull_request_count"] == 1
 
 
-def test_dynamic_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:
-    """Sensor setup should add aggregate entities and dynamic per-PR entities."""
+def test_dynamic_sensor_setup_adds_only_aggregate_entities() -> None:
+    """Sensor setup should add only aggregate entities."""
     pull_request = _pull_request()
     coordinator = _DynamicCoordinator([pull_request])
     entry = _FakeEntry(coordinator)
@@ -188,14 +190,16 @@ def test_dynamic_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:
     asyncio.run(async_setup_sensor_entry(None, entry, lambda entities: added_entities.extend(entities)))
 
     entity_names = {entity.name for entity in added_entities}
-    assert "Open pull requests" in entity_names
-    assert "Pull requests with active comments" in entity_names
-    assert "PR 23 state" in entity_names
-    assert "PR 23 new comments" in entity_names
+    assert "Authored open pull requests" in entity_names
+    assert "Reviewed open pull requests" in entity_names
+    assert "Failed builds" in entity_names
+    assert "Active work items" in entity_names
+    assert "Pipelines" in entity_names
+    assert all(not name.startswith("PR 23") for name in entity_names)
 
 
-def test_dynamic_binary_sensor_setup_adds_aggregate_and_per_pr_entities() -> None:
-    """Binary sensor setup should add aggregate entities and dynamic per-PR entities."""
+def test_dynamic_binary_sensor_setup_adds_only_aggregate_entities() -> None:
+    """Binary sensor setup should add only aggregate entities."""
     pull_request = _pull_request()
     coordinator = _DynamicCoordinator([pull_request])
     entry = _FakeEntry(coordinator)
@@ -206,10 +210,9 @@ def test_dynamic_binary_sensor_setup_adds_aggregate_and_per_pr_entities() -> Non
     entity_names = {entity.name for entity in added_entities}
     assert "Has new comment" in entity_names
     assert "Has active comments" in entity_names
-    assert "PR 23 has new comment" in entity_names
-    assert "PR 23 has active comments" in entity_names
-    assert "PR 23 build failed" in entity_names
-    assert "PR 23 ready to complete" in entity_names
+    assert "Has failed build" in entity_names
+    assert "Has ready pull request" in entity_names
+    assert all(not name.startswith("PR 23") for name in entity_names)
 
 
 def test_event_entity_forwards_matching_payloads() -> None:

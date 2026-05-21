@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
@@ -22,36 +22,13 @@ async def async_setup_entry(
     """Set up Azure DevOps Tracker sensors."""
     coordinator = entry.runtime_data
     entities: list[SensorEntity] = [
-        OpenPullRequestCountSensor(coordinator),
-        ReadyPullRequestCountSensor(coordinator),
-        PullRequestsWithActiveCommentsSensor(coordinator),
-        PullRequestsWithNewCommentsSensor(coordinator),
+        AuthoredOpenPullRequestsSensor(coordinator),
+        ReviewedOpenPullRequestsSensor(coordinator),
         FailedBuildCountSensor(coordinator),
         ActiveWorkItemCountSensor(coordinator),
         PipelineCountSensor(coordinator),
     ]
     async_add_entities(entities)
-
-    known_pr_ids: set[int] = set()
-
-    @callback
-    def _sync_pull_request_entities() -> None:
-        new_entities: list[SensorEntity] = []
-        for pull_request in coordinator.data.pull_requests:
-            if pull_request.pull_request_id in known_pr_ids:
-                continue
-            known_pr_ids.add(pull_request.pull_request_id)
-            new_entities.extend(
-                [
-                    PullRequestStateSensor(coordinator, pull_request.pull_request_id),
-                    PullRequestNewCommentCountSensor(coordinator, pull_request.pull_request_id),
-                ]
-            )
-        if new_entities:
-            async_add_entities(new_entities)
-
-    _sync_pull_request_entities()
-    entry.async_on_unload(coordinator.async_add_listener(_sync_pull_request_entities))
 
 
 class AzureDevOpsTrackerSensor(AzureDevOpsTrackerEntity, SensorEntity):
@@ -62,87 +39,68 @@ class AzureDevOpsTrackerSensor(AzureDevOpsTrackerEntity, SensorEntity):
         return None
 
 
-class OpenPullRequestCountSensor(AzureDevOpsTrackerSensor):
-    _attr_name = "Open pull requests"
+class AuthoredOpenPullRequestsSensor(AzureDevOpsTrackerSensor):
+    _attr_name = "Authored open pull requests"
     _attr_icon = "mdi:source-pull"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_open_pull_request_count"
+        self._attr_unique_id = f"{coordinator.project.id}_authored_open_pull_request_count"
 
     @property
     def native_value(self) -> StateType:
-        return len(self.coordinator.data.pull_requests)
+        return len(self.coordinator.authored_pull_requests)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any]:
         return {
             "project_name": self.coordinator.project.name,
             "project_id": self.coordinator.project.id,
-            "pull_requests": [pr.as_dict() for pr in self.coordinator.data.pull_requests],
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.authored_pull_requests],
+            "pull_request_summary": [
+                self._format_pull_request_summary(pr)
+                for pr in self.coordinator.authored_pull_requests
+            ],
+            "new_comment_count": sum(pr.new_comment_count for pr in self.coordinator.authored_pull_requests),
+            "active_comment_count": sum(pr.active_comment_count for pr in self.coordinator.authored_pull_requests),
+            "ready_to_complete_count": len(self.coordinator.authored_ready_pull_requests),
+            "failed_build_count": len([pr for pr in self.coordinator.authored_pull_requests if pr.build_failed]),
         }
 
+    @staticmethod
+    def _format_pull_request_summary(pr) -> str:
+        return (
+            f"PR {pr.pull_request_id} | {pr.title} | new: {pr.new_comment_count} | "
+            f"active: {pr.active_comment_count} | ready: {'yes' if pr.ready_to_complete else 'no'} | "
+            f"build failed: {'yes' if pr.build_failed else 'no'}"
+        )
 
-class ReadyPullRequestCountSensor(AzureDevOpsTrackerSensor):
-    _attr_name = "Ready pull requests"
-    _attr_icon = "mdi:check-decagram"
+class ReviewedOpenPullRequestsSensor(AzureDevOpsTrackerSensor):
+    _attr_name = "Reviewed open pull requests"
+    _attr_icon = "mdi:account-eye"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_ready_pull_request_count"
+        self._attr_unique_id = f"{coordinator.project.id}_reviewed_open_pull_request_count"
 
     @property
     def native_value(self) -> StateType:
-        return len(self.coordinator.ready_pull_requests)
+        return len(self.coordinator.reviewed_pull_requests)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any]:
         return {
-            "ready_pull_requests": [pr.as_dict() for pr in self.coordinator.ready_pull_requests],
-        }
-
-
-class PullRequestsWithNewCommentsSensor(AzureDevOpsTrackerSensor):
-    _attr_name = "Pull requests with new comments"
-    _attr_icon = "mdi:comment-alert"
-
-    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_pull_requests_with_new_comments"
-
-    @property
-    def native_value(self) -> StateType:
-        return len(self.coordinator.pull_requests_with_new_comments)
-
-    @property
-    def extra_state_attributes(self) -> Mapping[str, Any]:
-        latest_comment = self.coordinator.latest_unseen_comment
-        return {
-            "pull_requests": [pr.as_dict() for pr in self.coordinator.pull_requests_with_new_comments],
-            "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
-            "latest_comment_text": latest_comment.text if latest_comment else None,
-            "latest_comment_timestamp": latest_comment.published_date if latest_comment else None,
-            "latest_comment_thread_id": latest_comment.thread_id if latest_comment else None,
-            "latest_comment_url": latest_comment.url if latest_comment else None,
-        }
-
-
-class PullRequestsWithActiveCommentsSensor(AzureDevOpsTrackerSensor):
-    _attr_name = "Pull requests with active comments"
-    _attr_icon = "mdi:comment-processing"
-
-    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_pull_requests_with_active_comments"
-
-    @property
-    def native_value(self) -> StateType:
-        return len(self.coordinator.pull_requests_with_active_comments)
-
-    @property
-    def extra_state_attributes(self) -> Mapping[str, Any]:
-        return {
-            "pull_requests": [pr.as_dict() for pr in self.coordinator.pull_requests_with_active_comments],
+            "project_name": self.coordinator.project.name,
+            "project_id": self.coordinator.project.id,
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.reviewed_pull_requests],
+            "pull_request_summary": [
+                AuthoredOpenPullRequestsSensor._format_pull_request_summary(pr)
+                for pr in self.coordinator.reviewed_pull_requests
+            ],
+            "new_comment_count": sum(pr.new_comment_count for pr in self.coordinator.reviewed_pull_requests),
+            "active_comment_count": sum(pr.active_comment_count for pr in self.coordinator.reviewed_pull_requests),
+            "ready_to_complete_count": len(self.coordinator.reviewed_ready_pull_requests),
+            "failed_build_count": len([pr for pr in self.coordinator.reviewed_pull_requests if pr.build_failed]),
         }
 
 
@@ -203,101 +161,4 @@ class PipelineCountSensor(AzureDevOpsTrackerSensor):
         return {
             "pipelines": [pipeline.as_dict() for pipeline in self.coordinator.data.pipelines],
             "latest_builds": [build.as_dict() for build in self.coordinator.data.builds],
-        }
-
-
-class AzureDevOpsTrackerPullRequestSensor(AzureDevOpsTrackerSensor):
-    """Base class for sensors representing a single pull request."""
-
-    def __init__(self, coordinator: AzureDevOpsCoordinator, pull_request_id: int) -> None:
-        super().__init__(coordinator)
-        self.pull_request_id = pull_request_id
-
-    @property
-    def pull_request(self):
-        """Return the live pull request model."""
-        return self.coordinator.get_pull_request(self.pull_request_id)
-
-    @property
-    def available(self) -> bool:
-        """Keep the entity available only while the PR is in scope."""
-        return super().available and self.pull_request is not None
-
-
-class PullRequestStateSensor(AzureDevOpsTrackerPullRequestSensor):
-    """State sensor for a single pull request."""
-
-    _attr_icon = "mdi:source-pull"
-
-    def __init__(self, coordinator: AzureDevOpsCoordinator, pull_request_id: int) -> None:
-        super().__init__(coordinator, pull_request_id)
-        self._attr_unique_id = f"{coordinator.project.id}_pull_request_{pull_request_id}_state"
-
-    @property
-    def name(self) -> str:
-        """Return a display name for the PR sensor."""
-        pull_request = self.pull_request
-        if pull_request is None:
-            return f"Pull request {self.pull_request_id}"
-        return f"PR {self.pull_request_id} state"
-
-    @property
-    def native_value(self) -> StateType:
-        pull_request = self.pull_request
-        if pull_request is None:
-            return None
-        return pull_request.status
-
-    @property
-    def extra_state_attributes(self) -> Mapping[str, Any]:
-        pull_request = self.pull_request
-        if pull_request is None:
-            return {}
-        latest_comment = pull_request.latest_new_comment or pull_request.latest_comment
-        return {
-            **pull_request.as_dict(),
-            "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
-            "latest_comment_text": latest_comment.text if latest_comment else None,
-            "latest_comment_timestamp": latest_comment.published_date if latest_comment else None,
-        }
-
-
-class PullRequestNewCommentCountSensor(AzureDevOpsTrackerPullRequestSensor):
-    """New comment count sensor for a single pull request."""
-
-    _attr_icon = "mdi:comment-processing-outline"
-
-    def __init__(self, coordinator: AzureDevOpsCoordinator, pull_request_id: int) -> None:
-        super().__init__(coordinator, pull_request_id)
-        self._attr_unique_id = (
-            f"{coordinator.project.id}_pull_request_{pull_request_id}_new_comment_count"
-        )
-
-    @property
-    def name(self) -> str:
-        """Return a display name for the PR comment counter."""
-        return f"PR {self.pull_request_id} new comments"
-
-    @property
-    def native_value(self) -> StateType:
-        pull_request = self.pull_request
-        if pull_request is None:
-            return None
-        return pull_request.new_comment_count
-
-    @property
-    def extra_state_attributes(self) -> Mapping[str, Any]:
-        pull_request = self.pull_request
-        if pull_request is None:
-            return {}
-        latest_comment = pull_request.latest_new_comment
-        return {
-            "pull_request_title": pull_request.title,
-            "pull_request_url": pull_request.url,
-            "repository_name": pull_request.repository_name,
-            "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
-            "latest_comment_text": latest_comment.text if latest_comment else None,
-            "latest_comment_timestamp": latest_comment.published_date if latest_comment else None,
-            "latest_comment_thread_id": latest_comment.thread_id if latest_comment else None,
-            "latest_comment_file_path": latest_comment.file_path if latest_comment else None,
         }

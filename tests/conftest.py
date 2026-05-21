@@ -83,6 +83,7 @@ def _install_homeassistant_stubs() -> None:
     helpers = types.ModuleType("homeassistant.helpers")
     aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
     device_registry = types.ModuleType("homeassistant.helpers.device_registry")
+    entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
     entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
     selector = types.ModuleType("homeassistant.helpers.selector")
     storage = types.ModuleType("homeassistant.helpers.storage")
@@ -162,6 +163,13 @@ def _install_homeassistant_stubs() -> None:
 
     class DeviceInfo(dict):
         """Minimal DeviceInfo stub."""
+
+    class _EntityRegistry:
+        def __init__(self):
+            self.entities = {}
+
+        def async_remove(self, entity_id):
+            self.entities.pop(entity_id, None)
 
     class _SelectorBase:
         def __init__(self, config=None):
@@ -248,6 +256,7 @@ def _install_homeassistant_stubs() -> None:
     aiohttp_client.async_get_clientsession = async_get_clientsession
     device_registry.DeviceEntryType = DeviceEntryType
     device_registry.DeviceInfo = DeviceInfo
+    entity_registry.async_get = lambda _hass: _EntityRegistry()
     selector.BooleanSelector = BooleanSelector
     selector.NumberSelector = NumberSelector
     selector.NumberSelectorConfig = NumberSelectorConfig
@@ -284,6 +293,7 @@ def _install_homeassistant_stubs() -> None:
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
     sys.modules["homeassistant.helpers.device_registry"] = device_registry
+    sys.modules["homeassistant.helpers.entity_registry"] = entity_registry
     sys.modules["homeassistant.helpers.entity_platform"] = entity_platform
     sys.modules["homeassistant.helpers.selector"] = selector
     sys.modules["homeassistant.helpers.storage"] = storage

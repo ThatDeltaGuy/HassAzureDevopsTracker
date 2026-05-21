@@ -57,6 +57,8 @@ def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bo
         repository_id="repo-1",
         repository_name="Repo",
         author=IdentityInfo(id="author-1", display_name="Author", unique_name="author@example.com"),
+        is_authored_by_current_user=True,
+        is_reviewed_by_current_user=False,
         latest_new_comment=latest_new_comment,
         has_new_comment=has_new_comment,
         new_comment_count=new_count,
@@ -109,7 +111,7 @@ def test_classify_comments_ignores_deleted_system_and_own_comments() -> None:
         published_date="2026-05-18T10:03:00Z",
     )
 
-    latest_comment, latest_unseen, unseen_count = AzureDevOpsCoordinator._classify_comments(
+    latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [own_comment, system_comment, deleted_comment, unseen_comment],
         {"me"},
@@ -120,8 +122,8 @@ def test_classify_comments_ignores_deleted_system_and_own_comments() -> None:
     )
 
     assert latest_comment == unseen_comment
-    assert latest_unseen == unseen_comment
-    assert unseen_count == 1
+    assert latest_new == unseen_comment
+    assert new_count == 1
     assert set(coordinator._seen_state["comments"]["42"].keys()) == {"4"}
 
 
@@ -138,7 +140,7 @@ def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
         published_date="2026-05-18T09:00:00Z",
     )
 
-    _latest_comment, latest_unseen, unseen_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [bootstrap_comment],
         {"me"},
@@ -148,8 +150,8 @@ def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
         now=datetime(2026, 5, 18, 10, 5, tzinfo=timezone.utc),
     )
 
-    assert latest_unseen is None
-    assert unseen_count == 0
+    assert latest_new is None
+    assert new_count == 0
     assert "7" in coordinator._seen_state["comments"]["101"]
 
 
@@ -166,7 +168,7 @@ def test_classify_comments_bootstrap_keeps_comments_new_if_after_entry_creation(
         published_date="2026-05-18T10:30:00Z",
     )
 
-    _latest_comment, latest_unseen, unseen_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [new_comment],
         {"me"},
@@ -176,8 +178,8 @@ def test_classify_comments_bootstrap_keeps_comments_new_if_after_entry_creation(
         now=datetime(2026, 5, 18, 10, 31, tzinfo=timezone.utc),
     )
 
-    assert latest_unseen == new_comment
-    assert unseen_count == 1
+    assert latest_new == new_comment
+    assert new_count == 1
     assert "8" in coordinator._seen_state["comments"]["102"]
 
 
