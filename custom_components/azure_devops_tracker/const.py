@@ -37,9 +37,12 @@ MAX_SCAN_INTERVAL_SECONDS = 900
 STORE_VERSION = 1
 STORE_KEY = f"{DOMAIN}_seen_state"
 
-EVENT_NEW_PR_COMMENT = "azure_devops_new_pr_comment"
-EVENT_PR_BUILD_FAILED = "azure_devops_pr_build_failed"
-EVENT_PR_READY_TO_COMPLETE = "azure_devops_pr_ready_to_complete"
+EVENT_NEW_AUTHORED_PR_COMMENT = "azure_devops_new_comment_on_authored_pull_requests"
+EVENT_NEW_REVIEWED_PR_COMMENT = "azure_devops_new_comment_on_reviewed_pull_requests"
+EVENT_AUTHORED_PR_BUILD_FAILED = "azure_devops_failed_build_on_authored_pull_requests"
+EVENT_REVIEWED_PR_BUILD_FAILED = "azure_devops_failed_build_on_reviewed_pull_requests"
+EVENT_AUTHORED_PR_READY_TO_COMPLETE = "azure_devops_authored_pull_request_ready_to_complete"
+EVENT_REVIEWED_PR_READY_TO_COMPLETE = "azure_devops_reviewed_pull_request_ready_to_complete"
 
 HUMAN_COMMENT_TYPE = "text"
 

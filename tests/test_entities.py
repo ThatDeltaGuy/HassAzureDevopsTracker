@@ -290,8 +290,8 @@ def test_event_entity_forwards_matching_payloads() -> None:
     coordinator = _DynamicCoordinator([pull_request])
     entity = AzureDevOpsTrackerProjectEvent(
         coordinator,
-        "azure_devops_new_pr_comment",
-        "New PR comment",
+        "azure_devops_new_comment_on_authored_pull_requests",
+        "New comment on authored pull requests",
         "mdi:comment-outline",
     )
 
@@ -299,11 +299,11 @@ def test_event_entity_forwards_matching_payloads() -> None:
 
     payload = {"pull_request_id": 23, "text": "Please update the null handling."}
     for listener in coordinator._event_listeners:
-        listener("azure_devops_new_pr_comment", payload)
+        listener("azure_devops_new_comment_on_authored_pull_requests", payload)
 
-    assert entity._last_event == ("azure_devops_new_pr_comment", payload)
+    assert entity._last_event == ("azure_devops_new_comment_on_authored_pull_requests", payload)
 
     for listener in coordinator._event_listeners:
-        listener("azure_devops_pr_build_failed", {"pull_request_id": 23})
+        listener("azure_devops_failed_build_on_authored_pull_requests", {"pull_request_id": 23})
 
-    assert entity._last_event == ("azure_devops_new_pr_comment", payload)
+    assert entity._last_event == ("azure_devops_new_comment_on_authored_pull_requests", payload)

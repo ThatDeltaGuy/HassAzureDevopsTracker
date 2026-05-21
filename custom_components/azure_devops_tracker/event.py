@@ -6,7 +6,14 @@ from homeassistant.components.event import EventEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import EVENT_NEW_PR_COMMENT, EVENT_PR_BUILD_FAILED, EVENT_PR_READY_TO_COMPLETE
+from .const import (
+    EVENT_AUTHORED_PR_BUILD_FAILED,
+    EVENT_AUTHORED_PR_READY_TO_COMPLETE,
+    EVENT_NEW_AUTHORED_PR_COMMENT,
+    EVENT_NEW_REVIEWED_PR_COMMENT,
+    EVENT_REVIEWED_PR_BUILD_FAILED,
+    EVENT_REVIEWED_PR_READY_TO_COMPLETE,
+)
 from .coordinator import AzureDevOpsTrackerConfigEntry
 from .entity import AzureDevOpsTrackerEntity
 
@@ -20,9 +27,12 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     async_add_entities(
         [
-            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_NEW_PR_COMMENT, "New PR comment", "mdi:comment-outline"),
-            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_PR_BUILD_FAILED, "PR build failed", "mdi:alert-circle-outline"),
-            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_PR_READY_TO_COMPLETE, "PR ready to complete", "mdi:check-circle-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_NEW_AUTHORED_PR_COMMENT, "New comment on authored pull requests", "mdi:comment-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_NEW_REVIEWED_PR_COMMENT, "New comment on reviewed pull requests", "mdi:comment-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_AUTHORED_PR_BUILD_FAILED, "Failed build on authored pull requests", "mdi:alert-circle-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_REVIEWED_PR_BUILD_FAILED, "Failed build on reviewed pull requests", "mdi:alert-circle-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_AUTHORED_PR_READY_TO_COMPLETE, "Authored pull request ready to complete", "mdi:check-circle-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_REVIEWED_PR_READY_TO_COMPLETE, "Reviewed pull request ready to complete", "mdi:check-circle-outline"),
         ]
     )
 

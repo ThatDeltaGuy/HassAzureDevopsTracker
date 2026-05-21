@@ -314,9 +314,9 @@ def test_process_transitions_emits_expected_events() -> None:
 
     event_types = [event_type for event_type, _payload in events]
     assert event_types == [
-        "azure_devops_new_pr_comment",
-        "azure_devops_pr_build_failed",
-        "azure_devops_pr_ready_to_complete",
+        "azure_devops_new_comment_on_authored_pull_requests",
+        "azure_devops_failed_build_on_authored_pull_requests",
+        "azure_devops_authored_pull_request_ready_to_complete",
     ]
     new_comment_payload = events[0][1]
     assert new_comment_payload["pull_request_id"] == 77

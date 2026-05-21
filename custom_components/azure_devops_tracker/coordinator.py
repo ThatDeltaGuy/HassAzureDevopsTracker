@@ -29,9 +29,12 @@ from .const import (
     DEFAULT_ENABLE_WORK_ITEMS,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
-    EVENT_NEW_PR_COMMENT,
-    EVENT_PR_BUILD_FAILED,
-    EVENT_PR_READY_TO_COMPLETE,
+    EVENT_AUTHORED_PR_BUILD_FAILED,
+    EVENT_AUTHORED_PR_READY_TO_COMPLETE,
+    EVENT_NEW_AUTHORED_PR_COMMENT,
+    EVENT_NEW_REVIEWED_PR_COMMENT,
+    EVENT_REVIEWED_PR_BUILD_FAILED,
+    EVENT_REVIEWED_PR_READY_TO_COMPLETE,
     HUMAN_COMMENT_TYPE,
     NEW_COMMENT_WINDOW,
     OPTION_ENABLE_BUILDS,
@@ -448,7 +451,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         for pr in data.pull_requests:
             pr_key = str(pr.pull_request_id)
-            if self._initialized and pr.is_authored_by_current_user and pr.latest_new_comment is not None:
+            if self._initialized and pr.latest_new_comment is not None:
+                event_type = (
+                    EVENT_NEW_AUTHORED_PR_COMMENT
+                    if pr.is_authored_by_current_user
+                    else EVENT_NEW_REVIEWED_PR_COMMENT
+                )
                 payload = {
                     "organization": data.organization,
                     "project_id": data.project.id,
@@ -460,16 +468,16 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     "repository_name": pr.repository_name,
                     **pr.latest_new_comment.as_dict(),
                 }
-                self._dispatch_event(EVENT_NEW_PR_COMMENT, payload)
+                self._dispatch_event(event_type, payload)
 
-            if (
-                self._initialized
-                and pr.is_authored_by_current_user
-                and not previous_build_failures.get(pr_key, False)
-                and pr.build_failed
-            ):
+            if self._initialized and not previous_build_failures.get(pr_key, False) and pr.build_failed:
+                event_type = (
+                    EVENT_AUTHORED_PR_BUILD_FAILED
+                    if pr.is_authored_by_current_user
+                    else EVENT_REVIEWED_PR_BUILD_FAILED
+                )
                 self._dispatch_event(
-                    EVENT_PR_BUILD_FAILED,
+                    event_type,
                     {
                         "organization": data.organization,
                         "project_name": data.project.name,
@@ -481,14 +489,14 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     },
                 )
 
-            if (
-                self._initialized
-                and pr.is_authored_by_current_user
-                and not previous_ready.get(pr_key, False)
-                and pr.ready_to_complete
-            ):
+            if self._initialized and not previous_ready.get(pr_key, False) and pr.ready_to_complete:
+                event_type = (
+                    EVENT_AUTHORED_PR_READY_TO_COMPLETE
+                    if pr.is_authored_by_current_user
+                    else EVENT_REVIEWED_PR_READY_TO_COMPLETE
+                )
                 self._dispatch_event(
-                    EVENT_PR_READY_TO_COMPLETE,
+                    event_type,
                     {
                         "organization": data.organization,
                         "project_name": data.project.name,
