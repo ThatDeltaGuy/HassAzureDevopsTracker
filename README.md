@@ -52,9 +52,8 @@ Current v0.1 scaffold includes:
 - PAT + organization setup flow
 - project dropdown loaded from Azure DevOps
 - reconfigurable feature toggles
-- aggregate sensors for PRs, comments, builds, pipelines, and work items
-- per-PR sensors and binary sensors for tracked pull requests
-- binary sensors for `has_new_comment`, `has_failed_build`, and `has_ready_pull_request`
+- aggregate sensors for authored/reviewed PRs, project builds, pipelines, and work items
+- aggregate binary sensors for authored/reviewed PR attention states
 - Home Assistant events for:
   - `azure_devops_new_pr_comment`
   - `azure_devops_pr_build_failed`
@@ -106,7 +105,7 @@ For most installs, the safest practical approach is to create a dedicated PAT fo
 
 ## Comment Attributes
 
-The `binary_sensor.has_new_comment` entity exposes the latest unseen comment in attributes:
+The split `has_new_comment` binary sensors expose the latest detected new comment in attributes:
 
 - `latest_comment_author`
 - `latest_comment_text`
@@ -117,29 +116,38 @@ The `binary_sensor.has_new_comment` entity exposes the latest unseen comment in 
 
 The `azure_devops_new_pr_comment` event includes the same information in the event payload, along with PR and repository metadata.
 
+`New comments` are comments first detected by the integration within the last 15 minutes. This includes replies under existing PR comment threads.
+
+`Active comments` are human comments on PR threads whose thread status is still active.
+
 ## Entity Model
 
-Aggregate entities:
+Sensors:
 
-- sensor: open pull requests
-- sensor: ready pull requests
-- sensor: pull requests with new comments
+- sensor: authored open pull requests
+- sensor: reviewed open pull requests
 - sensor: failed builds
 - sensor: active work items
+- sensor: assigned active work items
 - sensor: pipelines
-- binary sensor: has new comment
-- binary sensor: has failed build
-- binary sensor: has ready pull request
 
-Per-PR entities for each tracked PR:
+Binary sensors:
 
-- sensor: `PR <id> state`
-- sensor: `PR <id> unseen comments`
-- binary sensor: `PR <id> has new comment`
-- binary sensor: `PR <id> build failed`
-- binary sensor: `PR <id> ready to complete`
+- binary sensor: has new comment on authored pull requests
+- binary sensor: has new comment on reviewed pull requests
+- binary sensor: has active comments on authored pull requests
+- binary sensor: has active comments on reviewed pull requests
+- binary sensor: has failed build on authored pull requests
+- binary sensor: has failed build on reviewed pull requests
+- binary sensor: has authored pull request ready to complete
+- binary sensor: has reviewed pull request ready to complete
 
-The per-PR entities are created dynamically for PRs that match the current scope: created by the authenticated user or where the authenticated user is a reviewer.
+Notes on scope:
+
+- `authored` PR entities only include PRs created by the authenticated user.
+- `reviewed` PR entities only include PRs where the authenticated user is a reviewer and not the author.
+- Home Assistant events only fire for authored PRs.
+- Per-PR entities are no longer created.
 
 ## Notes
 

@@ -21,10 +21,14 @@ async def async_setup_entry(
     """Set up Azure DevOps Tracker binary sensors."""
     coordinator = entry.runtime_data
     entities: list[BinarySensorEntity] = [
-        HasNewCommentBinarySensor(coordinator),
-        HasActiveCommentsBinarySensor(coordinator),
-        HasFailedBuildBinarySensor(coordinator),
-        HasReadyPullRequestBinarySensor(coordinator),
+        HasNewCommentOnAuthoredPullRequestsBinarySensor(coordinator),
+        HasNewCommentOnReviewedPullRequestsBinarySensor(coordinator),
+        HasActiveCommentsOnAuthoredPullRequestsBinarySensor(coordinator),
+        HasActiveCommentsOnReviewedPullRequestsBinarySensor(coordinator),
+        HasFailedBuildOnAuthoredPullRequestsBinarySensor(coordinator),
+        HasFailedBuildOnReviewedPullRequestsBinarySensor(coordinator),
+        HasAuthoredPullRequestReadyToCompleteBinarySensor(coordinator),
+        HasReviewedPullRequestReadyToCompleteBinarySensor(coordinator),
     ]
     async_add_entities(entities)
 
@@ -37,24 +41,24 @@ class AzureDevOpsTrackerBinarySensor(AzureDevOpsTrackerEntity, BinarySensorEntit
         return None
 
 
-class HasNewCommentBinarySensor(AzureDevOpsTrackerBinarySensor):
-    _attr_name = "Has new comment"
+class HasNewCommentOnAuthoredPullRequestsBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has new comment on authored pull requests"
     _attr_icon = "mdi:comment-alert"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_has_new_comment"
+        self._attr_unique_id = f"{coordinator.project.id}_has_new_comment_on_authored_pull_requests"
 
     @property
     def is_on(self) -> bool:
-        return bool(self.coordinator.pull_requests_with_new_comments)
+        return bool(self.coordinator.authored_pull_requests_with_new_comments)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any]:
-        latest_comment = self.coordinator.latest_new_comment
+        latest_comment = self.coordinator.latest_authored_new_comment
         return {
             "new_comment_count": sum(pr.new_comment_count for pr in self.coordinator.authored_pull_requests_with_new_comments),
-            "pull_request_count": len(self.coordinator.pull_requests_with_new_comments),
+            "pull_request_count": len(self.coordinator.authored_pull_requests_with_new_comments),
             "pull_requests": [pr.as_dict() for pr in self.coordinator.authored_pull_requests_with_new_comments],
             "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
             "latest_comment_text": latest_comment.text if latest_comment else None,
@@ -65,33 +69,81 @@ class HasNewCommentBinarySensor(AzureDevOpsTrackerBinarySensor):
         }
 
 
-class HasFailedBuildBinarySensor(AzureDevOpsTrackerBinarySensor):
-    _attr_name = "Has failed build"
+class HasNewCommentOnReviewedPullRequestsBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has new comment on reviewed pull requests"
+    _attr_icon = "mdi:comment-alert-outline"
+
+    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.project.id}_has_new_comment_on_reviewed_pull_requests"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.reviewed_pull_requests_with_new_comments)
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any]:
+        latest_comment = self.coordinator.latest_reviewed_new_comment
+        return {
+            "new_comment_count": sum(pr.new_comment_count for pr in self.coordinator.reviewed_pull_requests_with_new_comments),
+            "pull_request_count": len(self.coordinator.reviewed_pull_requests_with_new_comments),
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.reviewed_pull_requests_with_new_comments],
+            "latest_comment_author": latest_comment.author.display_name if latest_comment else None,
+            "latest_comment_text": latest_comment.text if latest_comment else None,
+            "latest_comment_timestamp": latest_comment.published_date if latest_comment else None,
+            "latest_comment_thread_id": latest_comment.thread_id if latest_comment else None,
+            "latest_comment_url": latest_comment.url if latest_comment else None,
+            "latest_comment_file_path": latest_comment.file_path if latest_comment else None,
+        }
+
+
+class HasFailedBuildOnAuthoredPullRequestsBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has failed build on authored pull requests"
     _attr_icon = "mdi:alert-circle"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_has_failed_build"
+        self._attr_unique_id = f"{coordinator.project.id}_has_failed_build_on_authored_pull_requests"
 
     @property
     def is_on(self) -> bool:
-        return bool(self.coordinator.failed_builds)
+        return bool(self.coordinator.authored_pull_requests_with_failed_builds)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any]:
         return {
-            "failed_build_count": len(self.coordinator.failed_builds),
-            "failed_builds": [build.as_dict() for build in self.coordinator.failed_builds],
+            "failed_build_count": len(self.coordinator.authored_pull_requests_with_failed_builds),
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.authored_pull_requests_with_failed_builds],
         }
 
 
-class HasActiveCommentsBinarySensor(AzureDevOpsTrackerBinarySensor):
-    _attr_name = "Has active comments"
+class HasFailedBuildOnReviewedPullRequestsBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has failed build on reviewed pull requests"
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.project.id}_has_failed_build_on_reviewed_pull_requests"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.reviewed_pull_requests_with_failed_builds)
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any]:
+        return {
+            "failed_build_count": len(self.coordinator.reviewed_pull_requests_with_failed_builds),
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.reviewed_pull_requests_with_failed_builds],
+        }
+
+
+class HasActiveCommentsOnAuthoredPullRequestsBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has active comments on authored pull requests"
     _attr_icon = "mdi:comment-processing"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_has_active_comments"
+        self._attr_unique_id = f"{coordinator.project.id}_has_active_comments_on_authored_pull_requests"
 
     @property
     def is_on(self) -> bool:
@@ -105,13 +157,33 @@ class HasActiveCommentsBinarySensor(AzureDevOpsTrackerBinarySensor):
         }
 
 
-class HasReadyPullRequestBinarySensor(AzureDevOpsTrackerBinarySensor):
-    _attr_name = "Has ready pull request"
+class HasActiveCommentsOnReviewedPullRequestsBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has active comments on reviewed pull requests"
+    _attr_icon = "mdi:comment-processing-outline"
+
+    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.project.id}_has_active_comments_on_reviewed_pull_requests"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.reviewed_pull_requests_with_active_comments)
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any]:
+        return {
+            "pull_request_count": len(self.coordinator.reviewed_pull_requests_with_active_comments),
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.reviewed_pull_requests_with_active_comments],
+        }
+
+
+class HasAuthoredPullRequestReadyToCompleteBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has authored pull request ready to complete"
     _attr_icon = "mdi:check-decagram"
 
     def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.project.id}_has_ready_pull_request"
+        self._attr_unique_id = f"{coordinator.project.id}_has_authored_pull_request_ready_to_complete"
 
     @property
     def is_on(self) -> bool:
@@ -122,4 +194,24 @@ class HasReadyPullRequestBinarySensor(AzureDevOpsTrackerBinarySensor):
         return {
             "ready_pull_request_count": len(self.coordinator.authored_ready_pull_requests),
             "pull_requests": [pr.as_dict() for pr in self.coordinator.authored_ready_pull_requests],
+        }
+
+
+class HasReviewedPullRequestReadyToCompleteBinarySensor(AzureDevOpsTrackerBinarySensor):
+    _attr_name = "Has reviewed pull request ready to complete"
+    _attr_icon = "mdi:check-decagram-outline"
+
+    def __init__(self, coordinator: AzureDevOpsCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.project.id}_has_reviewed_pull_request_ready_to_complete"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.reviewed_ready_pull_requests)
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any]:
+        return {
+            "ready_pull_request_count": len(self.coordinator.reviewed_ready_pull_requests),
+            "pull_requests": [pr.as_dict() for pr in self.coordinator.reviewed_ready_pull_requests],
         }

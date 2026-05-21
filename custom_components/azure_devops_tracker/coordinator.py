@@ -581,6 +581,14 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return [pr for pr in self.reviewed_pull_requests if pr.has_active_comments]
 
     @property
+    def authored_pull_requests_with_failed_builds(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.authored_pull_requests if pr.build_failed]
+
+    @property
+    def reviewed_pull_requests_with_failed_builds(self) -> list[PullRequestInfo]:
+        return [pr for pr in self.reviewed_pull_requests if pr.build_failed]
+
+    @property
     def ready_pull_requests(self) -> list[PullRequestInfo]:
         return [pr for pr in self.data.pull_requests if pr.ready_to_complete]
 
@@ -603,8 +611,65 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return dict(counts)
 
     @property
+    def current_user_aliases(self) -> set[str]:
+        current_user = self.data.current_user
+        if current_user is None:
+            return set()
+        return self._identity_aliases(current_user)
+
+    @property
+    def assigned_work_items(self) -> list[Any]:
+        aliases = self.current_user_aliases
+        assigned: list[Any] = []
+        for item in self.data.work_items:
+            normalized = self._normalize_identity_value(item.assigned_to)
+            if normalized and normalized in aliases:
+                assigned.append(item)
+        return assigned
+
+    @staticmethod
+    def _work_items_by_type(items: list[Any]) -> dict[str, int]:
+        counts = Counter(item.work_item_type or "Unknown" for item in items)
+        return dict(counts)
+
+    @staticmethod
+    def _work_items_by_state(items: list[Any]) -> dict[str, int]:
+        counts = Counter(item.state or "Unknown" for item in items)
+        return dict(counts)
+
+    @property
+    def assigned_work_items_by_type(self) -> dict[str, int]:
+        return self._work_items_by_type(self.assigned_work_items)
+
+    @property
+    def assigned_work_items_by_state(self) -> dict[str, int]:
+        return self._work_items_by_state(self.assigned_work_items)
+
+    @property
     def latest_new_comment(self) -> CommentInfo | None:
         comments = [pr.latest_new_comment for pr in self.pull_requests_with_new_comments if pr.latest_new_comment]
+        if not comments:
+            return None
+        return sorted(comments, key=lambda item: (item.published_date or "", item.comment_id))[-1]
+
+    @property
+    def latest_authored_new_comment(self) -> CommentInfo | None:
+        comments = [
+            pr.latest_new_comment
+            for pr in self.authored_pull_requests_with_new_comments
+            if pr.latest_new_comment
+        ]
+        if not comments:
+            return None
+        return sorted(comments, key=lambda item: (item.published_date or "", item.comment_id))[-1]
+
+    @property
+    def latest_reviewed_new_comment(self) -> CommentInfo | None:
+        comments = [
+            pr.latest_new_comment
+            for pr in self.reviewed_pull_requests_with_new_comments
+            if pr.latest_new_comment
+        ]
         if not comments:
             return None
         return sorted(comments, key=lambda item: (item.published_date or "", item.comment_id))[-1]
