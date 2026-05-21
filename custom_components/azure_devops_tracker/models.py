@@ -256,3 +256,4 @@ class CoordinatorData:
     builds: list[BuildInfo] = field(default_factory=list)
     work_items: list[WorkItemInfo] = field(default_factory=list)
     pull_requests: list[PullRequestInfo] = field(default_factory=list)
+    external_pull_requests: list[PullRequestInfo] = field(default_factory=list)

@@ -335,6 +335,42 @@ def test_process_transitions_emits_expected_events() -> None:
     assert coordinator._seen_state["pr_ready"]["77"] is True
 
 
+def test_process_transitions_emits_new_pull_request_published_event() -> None:
+    """A newly seen external PR with an approved build should emit its publish event."""
+    pull_request = _pull_request(88)
+    pull_request.is_authored_by_current_user = False
+    pull_request.is_reviewed_by_current_user = True
+    pull_request.build_failed = False
+    pull_request.policies = [
+        PolicyInfo(
+            evaluation_id="eval-build",
+            display_name="Build policy",
+            status="approved",
+            is_blocking=True,
+        )
+    ]
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+        external_pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events[0][0] == "azure_devops_new_pull_request_published"
+    assert events[0][1]["pull_request_id"] == 88
+    assert events[0][1]["policies"][0]["status"] == "approved"
+
+
 def test_active_comments_only_include_text_comments_from_active_threads() -> None:
     """Active comments should exclude fixed/system/deleted thread comments."""
     active_text = _comment(

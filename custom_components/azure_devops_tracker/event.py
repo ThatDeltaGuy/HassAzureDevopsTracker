@@ -10,6 +10,7 @@ from .const import (
     EVENT_AUTHORED_PR_BUILD_FAILED,
     EVENT_AUTHORED_PR_READY_TO_COMPLETE,
     EVENT_NEW_AUTHORED_PR_COMMENT,
+    EVENT_NEW_PULL_REQUEST_PUBLISHED,
     EVENT_NEW_REVIEWED_PR_COMMENT,
     EVENT_REVIEWED_PR_BUILD_FAILED,
     EVENT_REVIEWED_PR_READY_TO_COMPLETE,
@@ -27,6 +28,7 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     async_add_entities(
         [
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_NEW_PULL_REQUEST_PUBLISHED, "New pull request published", "mdi:source-pull"),
             AzureDevOpsTrackerProjectEvent(coordinator, EVENT_NEW_AUTHORED_PR_COMMENT, "New comment on authored pull requests", "mdi:comment-outline"),
             AzureDevOpsTrackerProjectEvent(coordinator, EVENT_NEW_REVIEWED_PR_COMMENT, "New comment on reviewed pull requests", "mdi:comment-outline"),
             AzureDevOpsTrackerProjectEvent(coordinator, EVENT_AUTHORED_PR_BUILD_FAILED, "Failed build on authored pull requests", "mdi:alert-circle-outline"),

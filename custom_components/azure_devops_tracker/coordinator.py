@@ -32,6 +32,7 @@ from .const import (
     EVENT_AUTHORED_PR_BUILD_FAILED,
     EVENT_AUTHORED_PR_READY_TO_COMPLETE,
     EVENT_NEW_AUTHORED_PR_COMMENT,
+    EVENT_NEW_PULL_REQUEST_PUBLISHED,
     EVENT_NEW_REVIEWED_PR_COMMENT,
     EVENT_REVIEWED_PR_BUILD_FAILED,
     EVENT_REVIEWED_PR_READY_TO_COMPLETE,
@@ -154,7 +155,9 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
             pipelines = await self.client.list_pipelines(self.organization, project.name) if self.enable_builds else []
             builds = await self.client.list_builds(self.organization, project.name) if self.enable_builds else []
             work_items = await self.client.list_work_items(self.organization, project.name) if self.enable_work_items else []
-            pull_requests = await self._load_pull_requests(current_user, project)
+            pull_requests, external_pull_requests = await self._load_pull_requests(
+                current_user, project
+            )
 
             data = CoordinatorData(
                 organization=self.organization,
@@ -164,6 +167,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 builds=builds,
                 work_items=work_items,
                 pull_requests=pull_requests,
+                external_pull_requests=external_pull_requests,
             )
 
             await self._process_transitions(data)
@@ -209,13 +213,14 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self,
         current_user: IdentityInfo,
         project: ProjectInfo,
-    ) -> list[PullRequestInfo]:
+    ) -> tuple[list[PullRequestInfo], list[PullRequestInfo]]:
         """Load and enrich relevant pull requests."""
         if not self.enable_pull_requests:
-            return []
+            return [], []
 
         pull_requests = await self.client.list_pull_requests(self.organization, project.name)
         relevant_prs: list[PullRequestInfo] = []
+        external_prs: list[PullRequestInfo] = []
 
         current_user_aliases = self._identity_aliases(current_user)
         current_user_id = current_user.id.casefold() if current_user.id else None
@@ -239,37 +244,8 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 )
                 for reviewer in pr.reviewers
             )
-            if not is_author and not is_reviewer:
-                _LOGGER.debug(
-                    "Skipping PR %s for current user; author=%s reviewers=%s",
-                    pr.pull_request_id,
-                    pr.author.as_dict(),
-                    [reviewer.as_dict() for reviewer in pr.reviewers],
-                )
-                continue
-
             pr.is_authored_by_current_user = is_author
             pr.is_reviewed_by_current_user = is_reviewer and not is_author
-
-            if self.enable_pr_comments and pr.repository_id:
-                comments = await self.client.list_pull_request_comments(
-                    self.organization,
-                    project.name,
-                    pr.repository_id,
-                    pr.pull_request_id,
-                )
-                pr.latest_comment, pr.latest_new_comment, pr.new_comment_count = self._classify_comments(
-                    comments,
-                    current_user_aliases,
-                    bootstrap=not self._initialized,
-                    pr_key=str(pr.pull_request_id),
-                    bootstrap_cutoff=self.entry.created_at,
-                    now=datetime.now(timezone.utc),
-                )
-                pr.active_comments = self._active_comments(comments)
-                pr.active_comment_count = len(pr.active_comments)
-                pr.has_active_comments = pr.active_comment_count > 0
-                pr.has_new_comment = pr.latest_new_comment is not None
 
             if self.enable_pr_policies:
                 pr.policies = await self.client.list_policy_evaluations(
@@ -292,6 +268,38 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     and not pr.build_failed
                     and policies_ok
                 )
+
+            if not is_author:
+                external_prs.append(pr)
+
+            if not is_author and not is_reviewer:
+                _LOGGER.debug(
+                    "Skipping PR %s for current user; author=%s reviewers=%s",
+                    pr.pull_request_id,
+                    pr.author.as_dict(),
+                    [reviewer.as_dict() for reviewer in pr.reviewers],
+                )
+                continue
+
+            if self.enable_pr_comments and pr.repository_id:
+                comments = await self.client.list_pull_request_comments(
+                    self.organization,
+                    project.name,
+                    pr.repository_id,
+                    pr.pull_request_id,
+                )
+                pr.latest_comment, pr.latest_new_comment, pr.new_comment_count = self._classify_comments(
+                    comments,
+                    current_user_aliases,
+                    bootstrap=not self._initialized,
+                    pr_key=str(pr.pull_request_id),
+                    bootstrap_cutoff=self.entry.created_at,
+                    now=datetime.now(timezone.utc),
+                )
+                pr.active_comments = self._active_comments(comments)
+                pr.active_comment_count = len(pr.active_comments)
+                pr.has_active_comments = pr.active_comment_count > 0
+                pr.has_new_comment = pr.latest_new_comment is not None
 
             relevant_prs.append(pr)
 
@@ -319,7 +327,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 ],
             )
 
-        return relevant_prs
+        return relevant_prs, external_prs
 
     def _classify_comments(
         self,
@@ -448,6 +456,34 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Persist seen state and emit transition events."""
         previous_build_failures: dict[str, bool] = self._seen_state.get("pr_build_failed", {})
         previous_ready: dict[str, bool] = self._seen_state.get("pr_ready", {})
+        published_pull_request_notifications: set[str] = {
+            str(pr_id)
+            for pr_id in self._seen_state.get("published_pull_request_notifications", [])
+        }
+
+        for pr in data.external_pull_requests:
+            pr_key = str(pr.pull_request_id)
+            if not self._initialized:
+                published_pull_request_notifications.add(pr_key)
+                continue
+            if pr_key not in published_pull_request_notifications and self._has_passing_build(pr):
+                self._dispatch_event(
+                    EVENT_NEW_PULL_REQUEST_PUBLISHED,
+                    {
+                        "organization": data.organization,
+                        "project_id": data.project.id,
+                        "project_name": data.project.name,
+                        "pull_request_id": pr.pull_request_id,
+                        "pull_request_title": pr.title,
+                        "pull_request_url": pr.url,
+                        "repository_id": pr.repository_id,
+                        "repository_name": pr.repository_name,
+                        "source_ref_name": pr.source_ref_name,
+                        "target_ref_name": pr.target_ref_name,
+                        "policies": [policy.as_dict() for policy in pr.policies],
+                    },
+                )
+                published_pull_request_notifications.add(pr_key)
 
         for pr in data.pull_requests:
             pr_key = str(pr.pull_request_id)
@@ -511,9 +547,26 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
             self._seen_state.setdefault("pr_build_failed", {})[pr_key] = pr.build_failed
             self._seen_state.setdefault("pr_ready", {})[pr_key] = pr.ready_to_complete
+            if pr.is_authored_by_current_user:
+                published_pull_request_notifications.add(pr_key)
 
+        self._seen_state["published_pull_request_notifications"] = sorted(
+            published_pull_request_notifications
+        )
         await self.store.async_save(self._seen_state)
         self._initialized = True
+
+    @staticmethod
+    def _has_passing_build(pr: PullRequestInfo) -> bool:
+        """Return whether the pull request has an approved build policy."""
+        build_policies = [
+            policy
+            for policy in pr.policies
+            if policy.display_name and "build" in policy.display_name.casefold()
+        ]
+        if not build_policies:
+            return False
+        return any(policy.status == "approved" for policy in build_policies)
 
     @staticmethod
     def _normalize_identity_value(value: str | None) -> str | None:
