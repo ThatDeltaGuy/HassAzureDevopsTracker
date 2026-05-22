@@ -292,7 +292,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     comments,
                     current_user_aliases,
                     bootstrap=not self._initialized,
-                    pr_key=str(pr.pull_request_id),
+                    pr_key=self._pull_request_tracking_key(pr),
                     bootstrap_cutoff=self.entry.created_at,
                     now=datetime.now(timezone.utc),
                 )
@@ -350,7 +350,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         tracked_comments = self._normalize_tracked_comments(stored_comments)
         if bootstrap and pr_key not in self._seen_state.get("comments", {}):
             tracked_comments = {
-                comment.comment_id: self._bootstrap_seen_timestamp(
+                self._comment_tracking_key(comment): self._bootstrap_seen_timestamp(
                     comment,
                     current_user_aliases,
                     bootstrap_cutoff,
@@ -362,41 +362,95 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         new_comments: list[CommentInfo] = []
         for comment in sorted_comments:
             if comment.is_deleted or comment.comment_type != HUMAN_COMMENT_TYPE:
+                _LOGGER.debug(
+                    "Ignoring PR comment thread=%s comment=%s because deleted=%s type=%s",
+                    comment.thread_id,
+                    comment.comment_id,
+                    comment.is_deleted,
+                    comment.comment_type,
+                )
                 continue
             if self._identity_matches(comment.author, current_user_aliases):
+                _LOGGER.debug(
+                    "Ignoring PR comment thread=%s comment=%s because author matches current user: %s",
+                    comment.thread_id,
+                    comment.comment_id,
+                    comment.author.as_dict(),
+                )
                 continue
             if not comment.text:
+                _LOGGER.debug(
+                    "Ignoring PR comment thread=%s comment=%s because it has no text",
+                    comment.thread_id,
+                    comment.comment_id,
+                )
                 continue
-            detected_at = tracked_comments.get(comment.comment_id)
+            comment_key = self._comment_tracking_key(comment)
+            # Legacy stored state used plain comment ids, which are only unique
+            # within a thread. Fall back once so existing entries migrate cleanly.
+            detected_at = tracked_comments.get(comment_key) or tracked_comments.get(
+                str(comment.comment_id)
+            )
             if detected_at is None:
-                tracked_comments[comment.comment_id] = now.isoformat()
-                detected_at = tracked_comments[comment.comment_id]
+                detected_at = now.isoformat()
+                _LOGGER.debug(
+                    "Detected new PR comment for pr_key=%s thread=%s comment=%s at %s",
+                    pr_key,
+                    comment.thread_id,
+                    comment.comment_id,
+                    detected_at,
+                )
+
+            _LOGGER.debug(
+                "Tracking PR comment for pr_key=%s thread=%s comment=%s seen_at=%s published_at=%s",
+                pr_key,
+                comment.thread_id,
+                comment.comment_id,
+                detected_at,
+                comment.published_date,
+            )
+
+            tracked_comments[comment_key] = detected_at
 
             detected_at_dt = self._parse_comment_datetime(detected_at)
             if detected_at_dt is not None and now - detected_at_dt <= NEW_COMMENT_WINDOW:
                 new_comments.append(comment)
 
-        self._seen_state.setdefault("comments", {})[pr_key] = {
-            str(comment_id): detected_at
-            for comment_id, detected_at in tracked_comments.items()
-        }
         latest_new = new_comments[-1] if new_comments else None
+        _LOGGER.debug(
+            "Classified PR comments for pr_key=%s: total=%s latest=%s latest_new=%s new_count=%s bootstrap=%s",
+            pr_key,
+            len(sorted_comments),
+            f"{latest_comment.thread_id}:{latest_comment.comment_id}" if latest_comment else None,
+            f"{latest_new.thread_id}:{latest_new.comment_id}" if latest_new else None,
+            len(new_comments),
+            bootstrap,
+        )
+        self._seen_state.setdefault("comments", {})[pr_key] = {
+            comment_key: detected_at
+            for comment_key, detected_at in tracked_comments.items()
+        }
         return latest_comment, latest_new, len(new_comments)
 
     @staticmethod
-    def _normalize_tracked_comments(stored_comments: Any) -> dict[int, str]:
+    def _normalize_tracked_comments(stored_comments: Any) -> dict[str, str]:
         """Normalize stored comment tracking state from older formats."""
         if isinstance(stored_comments, dict):
-            normalized: dict[int, str] = {}
-            for comment_id, detected_at in stored_comments.items():
-                try:
-                    normalized[int(comment_id)] = str(detected_at)
-                except (TypeError, ValueError):
-                    continue
+            normalized: dict[str, str] = {}
+            for comment_key, detected_at in stored_comments.items():
+                normalized[str(comment_key)] = str(detected_at)
             return normalized
         if isinstance(stored_comments, list):
-            return {int(comment_id): "1970-01-01T00:00:00+00:00" for comment_id in stored_comments}
+            return {
+                str(comment_id): "1970-01-01T00:00:00+00:00"
+                for comment_id in stored_comments
+            }
         return {}
+
+    @staticmethod
+    def _comment_tracking_key(comment: CommentInfo) -> str:
+        """Return a stable key for a comment across PR threads."""
+        return f"{comment.thread_id}:{comment.comment_id}"
 
     @classmethod
     def _should_mark_seen_on_bootstrap(
@@ -452,6 +506,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
             and comment.text
         ]
 
+    @staticmethod
+    def _pull_request_tracking_key(pr: PullRequestInfo) -> str:
+        """Return a stable key for PR state across repositories."""
+        repository_key = pr.repository_id or "unknown-repository"
+        return f"{repository_key}:{pr.pull_request_id}"
+
     async def _process_transitions(self, data: CoordinatorData) -> None:
         """Persist seen state and emit transition events."""
         previous_build_failures: dict[str, bool] = self._seen_state.get("pr_build_failed", {})
@@ -462,11 +522,17 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         }
 
         for pr in data.external_pull_requests:
-            pr_key = str(pr.pull_request_id)
+            pr_key = self._pull_request_tracking_key(pr)
             if not self._initialized:
                 published_pull_request_notifications.add(pr_key)
                 continue
             if pr_key not in published_pull_request_notifications and self._has_passing_build(pr):
+                _LOGGER.debug(
+                    "Emitting published PR event for repo=%s pr=%s key=%s",
+                    pr.repository_name,
+                    pr.pull_request_id,
+                    pr_key,
+                )
                 self._dispatch_event(
                     EVENT_NEW_PULL_REQUEST_PUBLISHED,
                     {
@@ -486,12 +552,21 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 published_pull_request_notifications.add(pr_key)
 
         for pr in data.pull_requests:
-            pr_key = str(pr.pull_request_id)
+            pr_key = self._pull_request_tracking_key(pr)
             if self._initialized and pr.latest_new_comment is not None:
                 event_type = (
                     EVENT_NEW_AUTHORED_PR_COMMENT
                     if pr.is_authored_by_current_user
                     else EVENT_NEW_REVIEWED_PR_COMMENT
+                )
+                _LOGGER.debug(
+                    "Emitting comment event %s for repo=%s pr=%s thread=%s comment=%s key=%s",
+                    event_type,
+                    pr.repository_name,
+                    pr.pull_request_id,
+                    pr.latest_new_comment.thread_id,
+                    pr.latest_new_comment.comment_id,
+                    pr_key,
                 )
                 payload = {
                     "organization": data.organization,
@@ -512,6 +587,13 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     if pr.is_authored_by_current_user
                     else EVENT_REVIEWED_PR_BUILD_FAILED
                 )
+                _LOGGER.debug(
+                    "Emitting build-failed event %s for repo=%s pr=%s key=%s",
+                    event_type,
+                    pr.repository_name,
+                    pr.pull_request_id,
+                    pr_key,
+                )
                 self._dispatch_event(
                     event_type,
                     {
@@ -530,6 +612,13 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     EVENT_AUTHORED_PR_READY_TO_COMPLETE
                     if pr.is_authored_by_current_user
                     else EVENT_REVIEWED_PR_READY_TO_COMPLETE
+                )
+                _LOGGER.debug(
+                    "Emitting ready-to-complete event %s for repo=%s pr=%s key=%s",
+                    event_type,
+                    pr.repository_name,
+                    pr.pull_request_id,
+                    pr_key,
                 )
                 self._dispatch_event(
                     event_type,

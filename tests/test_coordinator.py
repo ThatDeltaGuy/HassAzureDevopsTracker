@@ -124,7 +124,7 @@ def test_classify_comments_ignores_deleted_system_and_own_comments() -> None:
     assert latest_comment == unseen_comment
     assert latest_new == unseen_comment
     assert new_count == 1
-    assert set(coordinator._seen_state["comments"]["42"].keys()) == {"4"}
+    assert set(coordinator._seen_state["comments"]["42"].keys()) == {"104:4"}
 
 
 def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
@@ -152,7 +152,7 @@ def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
 
     assert latest_new is None
     assert new_count == 0
-    assert "7" in coordinator._seen_state["comments"]["101"]
+    assert "107:7" in coordinator._seen_state["comments"]["101"]
 
 
 def test_classify_comments_bootstrap_keeps_comments_new_if_after_entry_creation() -> None:
@@ -180,7 +180,7 @@ def test_classify_comments_bootstrap_keeps_comments_new_if_after_entry_creation(
 
     assert latest_new == new_comment
     assert new_count == 1
-    assert "8" in coordinator._seen_state["comments"]["102"]
+    assert "108:8" in coordinator._seen_state["comments"]["102"]
 
 
 def test_classify_comments_keeps_new_comments_for_fifteen_minutes() -> None:
@@ -235,6 +235,46 @@ def test_classify_comments_expires_new_comments_after_fifteen_minutes() -> None:
 
     assert latest_new is None
     assert new_count == 0
+
+
+def test_classify_comments_distinguishes_same_comment_id_in_different_threads() -> None:
+    """Comments from different threads should not share seen-state keys."""
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {
+        "comments": {"105": {"1:1": "2026-05-18T10:00:00+00:00"}}
+    }
+
+    older_thread_comment = _comment(
+        1,
+        author_id="user-1",
+        author_name="Reviewer One",
+        text="Earlier thread comment",
+        published_date="2026-05-18T09:59:00Z",
+    )
+    older_thread_comment.thread_id = 1
+
+    new_thread_comment = _comment(
+        1,
+        author_id="user-2",
+        author_name="Reviewer Two",
+        text="New thread comment",
+        published_date="2026-05-18T10:10:00Z",
+    )
+    new_thread_comment.thread_id = 2
+
+    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+        coordinator,
+        [older_thread_comment, new_thread_comment],
+        {"me"},
+        bootstrap=False,
+        pr_key="105",
+        bootstrap_cutoff=None,
+        now=datetime(2026, 5, 18, 10, 11, tzinfo=timezone.utc),
+    )
+
+    assert latest_new == new_thread_comment
+    assert new_count == 2
+    assert set(coordinator._seen_state["comments"]["105"].keys()) == {"1:1", "2:1"}
 
 
 def test_identity_matches_by_id_and_unique_name() -> None:
@@ -331,8 +371,8 @@ def test_process_transitions_emits_expected_events() -> None:
     assert ready_payload["source_ref_name"] == "refs/heads/feature"
     assert ready_payload["target_ref_name"] == "refs/heads/main"
     assert coordinator.store.saved is not None
-    assert coordinator._seen_state["pr_build_failed"]["77"] is True
-    assert coordinator._seen_state["pr_ready"]["77"] is True
+    assert coordinator._seen_state["pr_build_failed"]["repo-1:77"] is True
+    assert coordinator._seen_state["pr_ready"]["repo-1:77"] is True
 
 
 def test_process_transitions_emits_new_pull_request_published_event() -> None:

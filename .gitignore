@@ -122,3 +122,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+.github/agents/
+.github/prompts/
+.github/resources/
+.github/skills/
+.github/copilot-customisations.manifest.json
