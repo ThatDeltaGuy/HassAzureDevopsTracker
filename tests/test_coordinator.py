@@ -43,7 +43,16 @@ def _comment(
     )
 
 
-def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bool = False, ready: bool = False, latest_new_comment: CommentInfo | None = None, new_count: int = 0) -> PullRequestInfo:
+def _pull_request(
+    pr_id: int,
+    *,
+    has_new_comment: bool = False,
+    build_failed: bool = False,
+    ready: bool = False,
+    latest_new_comment: CommentInfo | None = None,
+    new_comments: list[CommentInfo] | None = None,
+    new_count: int = 0,
+) -> PullRequestInfo:
     return PullRequestInfo(
         pull_request_id=pr_id,
         title=f"PR {pr_id}",
@@ -60,6 +69,7 @@ def _pull_request(pr_id: int, *, has_new_comment: bool = False, build_failed: bo
         is_authored_by_current_user=True,
         is_reviewed_by_current_user=False,
         latest_new_comment=latest_new_comment,
+        new_comments=new_comments or ([] if latest_new_comment is None else [latest_new_comment]),
         has_new_comment=has_new_comment,
         new_comment_count=new_count,
         build_failed=build_failed,
@@ -111,7 +121,7 @@ def test_classify_comments_ignores_deleted_system_and_own_comments() -> None:
         published_date="2026-05-18T10:03:00Z",
     )
 
-    latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+    latest_comment, latest_new, new_count, _new_comments = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [own_comment, system_comment, deleted_comment, unseen_comment],
         {"me"},
@@ -140,7 +150,7 @@ def test_classify_comments_bootstrap_marks_existing_comments_as_seen() -> None:
         published_date="2026-05-18T09:00:00Z",
     )
 
-    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count, _new_comments = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [bootstrap_comment],
         {"me"},
@@ -168,7 +178,7 @@ def test_classify_comments_bootstrap_keeps_comments_new_if_after_entry_creation(
         published_date="2026-05-18T10:30:00Z",
     )
 
-    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count, _new_comments = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [new_comment],
         {"me"},
@@ -196,7 +206,7 @@ def test_classify_comments_keeps_new_comments_for_fifteen_minutes() -> None:
         published_date="2026-05-18T09:59:00Z",
     )
 
-    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count, _new_comments = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [comment],
         {"me"},
@@ -223,7 +233,7 @@ def test_classify_comments_expires_new_comments_after_fifteen_minutes() -> None:
         published_date="2026-05-18T09:59:00Z",
     )
 
-    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count, _new_comments = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [comment],
         {"me"},
@@ -262,7 +272,7 @@ def test_classify_comments_distinguishes_same_comment_id_in_different_threads() 
     )
     new_thread_comment.thread_id = 2
 
-    _latest_comment, latest_new, new_count = AzureDevOpsCoordinator._classify_comments(
+    _latest_comment, latest_new, new_count, _new_comments = AzureDevOpsCoordinator._classify_comments(
         coordinator,
         [older_thread_comment, new_thread_comment],
         {"me"},
@@ -373,6 +383,99 @@ def test_process_transitions_emits_expected_events() -> None:
     assert coordinator.store.saved is not None
     assert coordinator._seen_state["pr_build_failed"]["repo-1:77"] is True
     assert coordinator._seen_state["pr_ready"]["repo-1:77"] is True
+    assert coordinator._seen_state["comment_notifications"]["repo-1:77"] == ["111:11"]
+
+
+def test_process_transitions_emits_each_new_comment_once() -> None:
+    """New comment events should emit once per distinct comment, not once per poll."""
+    first_comment = _comment(
+        11,
+        author_id="reviewer-1",
+        author_name="Reviewer",
+        text="First new comment",
+        published_date="2026-05-18T11:00:00Z",
+    )
+    second_comment = _comment(
+        12,
+        author_id="reviewer-2",
+        author_name="Reviewer Two",
+        text="Second new comment",
+        published_date="2026-05-18T11:01:00Z",
+    )
+    pull_request = _pull_request(
+        77,
+        has_new_comment=True,
+        latest_new_comment=second_comment,
+        new_comments=[first_comment, second_comment],
+        new_count=2,
+    )
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    comment_events = [payload for event_type, payload in events if event_type == "azure_devops_new_comment_on_authored_pull_requests"]
+    assert len(comment_events) == 2
+    assert [payload["text"] for payload in comment_events] == ["First new comment", "Second new comment"]
+
+
+def test_process_transitions_emits_later_new_comment_after_prior_notifications_exist() -> None:
+    """A later comment should still emit even when an earlier new comment was already notified."""
+    first_comment = _comment(
+        11,
+        author_id="reviewer-1",
+        author_name="Reviewer",
+        text="Already notified",
+        published_date="2026-05-18T11:00:00Z",
+    )
+    second_comment = _comment(
+        12,
+        author_id="reviewer-2",
+        author_name="Reviewer Two",
+        text="Newly detected",
+        published_date="2026-05-18T11:01:00Z",
+    )
+    pull_request = _pull_request(
+        77,
+        has_new_comment=True,
+        latest_new_comment=second_comment,
+        new_comments=[first_comment, second_comment],
+        new_count=2,
+    )
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {
+        "comment_notifications": {"repo-1:77": ["111:11"]}
+    }
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    comment_events = [payload for event_type, payload in events if event_type == "azure_devops_new_comment_on_authored_pull_requests"]
+    assert len(comment_events) == 1
+    assert comment_events[0]["text"] == "Newly detected"
+    assert coordinator._seen_state["comment_notifications"]["repo-1:77"] == ["111:11", "112:12"]
 
 
 def test_process_transitions_emits_new_pull_request_published_event() -> None:

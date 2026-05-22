@@ -111,6 +111,7 @@ class PullRequestInfo:
     policies: list[PolicyInfo] = field(default_factory=list)
     latest_comment: CommentInfo | None = None
     latest_new_comment: CommentInfo | None = None
+    new_comments: list[CommentInfo] = field(default_factory=list)
     active_comments: list[CommentInfo] = field(default_factory=list)
     active_comment_count: int = 0
     has_active_comments: bool = False
@@ -152,6 +153,7 @@ class PullRequestInfo:
             "latest_new_comment": self.latest_new_comment.as_dict()
             if self.latest_new_comment
             else None,
+            "new_comments": [comment.as_dict() for comment in self.new_comments],
             "active_comments": [comment.as_dict() for comment in self.active_comments],
             "active_comment_count": self.active_comment_count,
             "has_active_comments": self.has_active_comments,

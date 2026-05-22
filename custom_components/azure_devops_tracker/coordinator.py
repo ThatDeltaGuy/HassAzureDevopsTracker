@@ -288,7 +288,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     pr.repository_id,
                     pr.pull_request_id,
                 )
-                pr.latest_comment, pr.latest_new_comment, pr.new_comment_count = self._classify_comments(
+                (
+                    pr.latest_comment,
+                    pr.latest_new_comment,
+                    pr.new_comment_count,
+                    pr.new_comments,
+                ) = self._classify_comments(
                     comments,
                     current_user_aliases,
                     bootstrap=not self._initialized,
@@ -338,7 +343,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         pr_key: str,
         bootstrap_cutoff: datetime | None,
         now: datetime,
-    ) -> tuple[CommentInfo | None, CommentInfo | None, int]:
+    ) -> tuple[CommentInfo | None, CommentInfo | None, int, list[CommentInfo]]:
         """Return the latest comment and new human comment details."""
         sorted_comments = sorted(
             comments,
@@ -430,7 +435,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
             comment_key: detected_at
             for comment_key, detected_at in tracked_comments.items()
         }
-        return latest_comment, latest_new, len(new_comments)
+        return latest_comment, latest_new, len(new_comments), new_comments
 
     @staticmethod
     def _normalize_tracked_comments(stored_comments: Any) -> dict[str, str]:
@@ -516,6 +521,9 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Persist seen state and emit transition events."""
         previous_build_failures: dict[str, bool] = self._seen_state.get("pr_build_failed", {})
         previous_ready: dict[str, bool] = self._seen_state.get("pr_ready", {})
+        previous_comment_notifications: dict[str, list[str]] = self._seen_state.get(
+            "comment_notifications", {}
+        )
         published_pull_request_notifications: set[str] = {
             str(pr_id)
             for pr_id in self._seen_state.get("published_pull_request_notifications", [])
@@ -553,33 +561,57 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         for pr in data.pull_requests:
             pr_key = self._pull_request_tracking_key(pr)
-            if self._initialized and pr.latest_new_comment is not None:
+            comment_notifications = {
+                str(comment_key)
+                for comment_key in previous_comment_notifications.get(pr_key, [])
+            }
+            current_comment_keys = {
+                self._comment_tracking_key(comment) for comment in pr.new_comments
+            }
+            comment_notifications &= current_comment_keys
+
+            if self._initialized and pr.new_comments:
                 event_type = (
                     EVENT_NEW_AUTHORED_PR_COMMENT
                     if pr.is_authored_by_current_user
                     else EVENT_NEW_REVIEWED_PR_COMMENT
                 )
-                _LOGGER.debug(
-                    "Emitting comment event %s for repo=%s pr=%s thread=%s comment=%s key=%s",
-                    event_type,
-                    pr.repository_name,
-                    pr.pull_request_id,
-                    pr.latest_new_comment.thread_id,
-                    pr.latest_new_comment.comment_id,
-                    pr_key,
-                )
-                payload = {
-                    "organization": data.organization,
-                    "project_id": data.project.id,
-                    "project_name": data.project.name,
-                    "pull_request_id": pr.pull_request_id,
-                    "pull_request_title": pr.title,
-                    "pull_request_url": pr.url,
-                    "repository_id": pr.repository_id,
-                    "repository_name": pr.repository_name,
-                    **pr.latest_new_comment.as_dict(),
-                }
-                self._dispatch_event(event_type, payload)
+                for comment in pr.new_comments:
+                    comment_key = self._comment_tracking_key(comment)
+                    if comment_key in comment_notifications:
+                        _LOGGER.debug(
+                            "Skipping duplicate comment event %s for repo=%s pr=%s thread=%s comment=%s key=%s",
+                            event_type,
+                            pr.repository_name,
+                            pr.pull_request_id,
+                            comment.thread_id,
+                            comment.comment_id,
+                            pr_key,
+                        )
+                        continue
+
+                    _LOGGER.debug(
+                        "Emitting comment event %s for repo=%s pr=%s thread=%s comment=%s key=%s",
+                        event_type,
+                        pr.repository_name,
+                        pr.pull_request_id,
+                        comment.thread_id,
+                        comment.comment_id,
+                        pr_key,
+                    )
+                    payload = {
+                        "organization": data.organization,
+                        "project_id": data.project.id,
+                        "project_name": data.project.name,
+                        "pull_request_id": pr.pull_request_id,
+                        "pull_request_title": pr.title,
+                        "pull_request_url": pr.url,
+                        "repository_id": pr.repository_id,
+                        "repository_name": pr.repository_name,
+                        **comment.as_dict(),
+                    }
+                    self._dispatch_event(event_type, payload)
+                    comment_notifications.add(comment_key)
 
             if self._initialized and not previous_build_failures.get(pr_key, False) and pr.build_failed:
                 event_type = (
@@ -636,6 +668,9 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
             self._seen_state.setdefault("pr_build_failed", {})[pr_key] = pr.build_failed
             self._seen_state.setdefault("pr_ready", {})[pr_key] = pr.ready_to_complete
+            self._seen_state.setdefault("comment_notifications", {})[pr_key] = sorted(
+                comment_notifications
+            )
             if pr.is_authored_by_current_user:
                 published_pull_request_notifications.add(pr_key)
 
