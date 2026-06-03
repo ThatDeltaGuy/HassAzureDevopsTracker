@@ -1,5 +1,8 @@
 {
   "name": "Azure DevOps Tracker",
+  "homeassistant": "2025.1.0",
   "content_in_root": false,
-  "render_readme": true
+  "render_readme": true,
+  "zip_release": true,
+  "filename": "azure-devops-tracker.zip"
 }

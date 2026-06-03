@@ -35,16 +35,18 @@ HACS can install this integration directly from the default branch, but tagged G
 
 Recommended release flow:
 
-1. Update `custom_components/azure_devops_tracker/manifest.json` and bump the `version` field.
-2. Commit the version change.
-3. Create a Git tag that matches the release version, for example `v0.1.0`.
-4. Publish a GitHub Release from that tag.
+1. Merge the intended release commit onto the `release` branch.
+2. Update `custom_components/azure_devops_tracker/manifest.json` and bump the `version` field on `release`.
+3. Run the `Release` GitHub Actions workflow from the `release` branch.
+4. Provide the version number without the leading `v`, for example `0.1.0`.
+5. The workflow runs the test suite, creates the tag `v<version>`, builds `azure-devops-tracker.zip`, and publishes the GitHub Release.
 
 Notes:
 
 - HACS uses GitHub Releases when they exist and will show recent release versions in the UI.
 - If no GitHub Releases exist, HACS falls back to the repository default branch.
-- Tags by themselves are useful for source history, but GitHub Releases are the part HACS uses to present installable versions nicely.
+- Tags are created by the workflow and are only allowed from the `release` branch in this repository process.
+- GitHub Releases are the part HACS uses to present installable versions nicely.
 - The `manifest.json` version should match the released version so Home Assistant can track the installed custom integration version correctly.
 
 Current v0.1 scaffold includes:
