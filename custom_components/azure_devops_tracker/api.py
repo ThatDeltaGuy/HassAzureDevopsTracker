@@ -425,6 +425,7 @@ class AzureDevOpsClient:
             id=payload.get("id"),
             display_name=payload.get("displayName"),
             unique_name=payload.get("uniqueName") or payload.get("emailAddress"),
+            vote=payload.get("vote"),
         )
 
     @staticmethod

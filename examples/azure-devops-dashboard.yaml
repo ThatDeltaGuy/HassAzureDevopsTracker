@@ -1,0 +1,260 @@
+title: Azure DevOps
+path: azure-devops
+icon: mdi:microsoft-azure-devops
+type: sections
+max_columns: 4
+badges:
+  - type: entity
+    entity: sensor.authored_open_pull_requests
+    name: Authored PRs
+    icon: mdi:source-pull
+  - type: entity
+    entity: sensor.reviewed_open_pull_requests
+    name: Reviewed PRs
+    icon: mdi:account-eye
+  - type: entity
+    entity: sensor.failed_builds
+    name: Failed Builds
+    icon: mdi:alert-circle
+  - type: entity
+    entity: sensor.active_work_items
+    name: Active Work Items
+    icon: mdi:clipboard-list
+  - type: entity
+    entity: sensor.assigned_active_work_items
+    name: Assigned To Me
+    icon: mdi:clipboard-account
+  - type: entity
+    entity: sensor.pipelines
+    name: Pipelines
+    icon: mdi:source-branch
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: My PR Attention
+        icon: mdi:account
+
+      - type: entities
+        entities:
+          - entity: binary_sensor.has_new_comment_on_authored_pull_requests
+            name: New comments
+          - entity: binary_sensor.has_active_comments_on_authored_pull_requests
+            name: Active comments
+          - entity: binary_sensor.has_failed_build_on_authored_pull_requests
+            name: Failed builds
+          - entity: binary_sensor.has_authored_pull_request_ready_to_complete
+            name: Ready to complete
+
+      - type: heading
+        heading: Reviewed PR Attention
+        icon: mdi:account-check
+
+      - type: entities
+        entities:
+          - entity: binary_sensor.has_new_comment_on_reviewed_pull_requests
+            name: New comments
+          - entity: binary_sensor.has_active_comments_on_reviewed_pull_requests
+            name: Active comments
+          - entity: binary_sensor.has_failed_build_on_reviewed_pull_requests
+            name: Failed builds
+          - entity: binary_sensor.has_reviewed_pull_request_ready_to_complete
+            name: Ready to complete
+
+  - type: grid
+    cards:
+      - type: custom:mushroom-template-card
+        entity: binary_sensor.has_new_comment_on_authored_pull_requests
+        primary: Latest Comment On My PRs
+        secondary: >-
+          {% set author = state_attr('binary_sensor.has_new_comment_on_authored_pull_requests', 'latest_comment_author') %}
+          {% set text = state_attr('binary_sensor.has_new_comment_on_authored_pull_requests', 'latest_comment_text') %}
+          {% if author and text %}
+            {{ author }}: {{ text[:120] ~ ('...' if text|length > 120 else '') }}
+          {% else %}
+            No recent new comment
+          {% endif %}
+        multiline_secondary: true
+        icon: mdi:comment-alert
+        icon_color: >-
+          {% if is_state('binary_sensor.has_new_comment_on_authored_pull_requests', 'on') %} amber {% else %} grey {% endif %}
+        tap_action:
+          action: more-info
+
+      - type: entities
+        title: My Latest Comment Detail
+        entities:
+          - type: custom:template-entity-row
+            name: Author
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_authored_pull_requests', 'latest_comment_author') or '-' }}"
+          - type: custom:template-entity-row
+            name: Timestamp
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_authored_pull_requests', 'latest_comment_timestamp') or '-' }}"
+          - type: custom:template-entity-row
+            name: File
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_authored_pull_requests', 'latest_comment_file_path') or '-' }}"
+          - type: custom:template-entity-row
+            name: PRs with new comments
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_authored_pull_requests', 'pull_request_count') or 0 }}"
+
+      - type: custom:mushroom-template-card
+        entity: binary_sensor.has_new_comment_on_reviewed_pull_requests
+        primary: Latest Comment On Reviewed PRs
+        secondary: >-
+          {% set author = state_attr('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'latest_comment_author') %}
+          {% set text = state_attr('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'latest_comment_text') %}
+          {% if author and text %}
+            {{ author }}: {{ text[:120] ~ ('...' if text|length > 120 else '') }}
+          {% else %}
+            No recent new comment
+          {% endif %}
+        multiline_secondary: true
+        icon: mdi:comment-alert-outline
+        icon_color: >-
+          {% if is_state('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'on') %} amber {% else %} grey {% endif %}
+        tap_action:
+          action: more-info
+
+      - type: entities
+        title: Reviewed Comment Detail
+        entities:
+          - type: custom:template-entity-row
+            name: Author
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'latest_comment_author') or '-' }}"
+          - type: custom:template-entity-row
+            name: Timestamp
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'latest_comment_timestamp') or '-' }}"
+          - type: custom:template-entity-row
+            name: File
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'latest_comment_file_path') or '-' }}"
+          - type: custom:template-entity-row
+            name: PRs with new comments
+            state: "{{ state_attr('binary_sensor.has_new_comment_on_reviewed_pull_requests', 'pull_request_count') or 0 }}"
+
+  - type: grid
+    cards:
+      - type: markdown
+        title: My Open PRs
+        content: >-
+          {% set prs = state_attr('sensor.authored_open_pull_requests', 'pull_requests') or [] %}
+          {% if prs %}
+          {% for pr in prs %}
+          - **PR {{ pr.pull_request_id }}**: {{ pr.title }}
+            - New comments: {{ pr.new_comment_count }}
+            - Active comments: {{ pr.active_comment_count }}
+            - Ready to complete: {{ 'Yes' if pr.ready_to_complete else 'No' }}
+            - Build failed: {{ 'Yes' if pr.build_failed else 'No' }}
+            - Repo: {{ pr.repository_name or '-' }}
+          {% endfor %}
+          {% else %}
+          No authored PRs.
+          {% endif %}
+
+      - type: markdown
+        title: Reviewed Open PRs
+        content: >-
+          {% set prs = state_attr('sensor.reviewed_open_pull_requests', 'pull_requests') or [] %}
+          {% if prs %}
+          {% for pr in prs %}
+          - **PR {{ pr.pull_request_id }}**: {{ pr.title }}
+            - New comments: {{ pr.new_comment_count }}
+            - Active comments: {{ pr.active_comment_count }}
+            - Ready to complete: {{ 'Yes' if pr.ready_to_complete else 'No' }}
+            - Build failed: {{ 'Yes' if pr.build_failed else 'No' }}
+            - Repo: {{ pr.repository_name or '-' }}
+          {% endfor %}
+          {% else %}
+          No reviewed PRs.
+          {% endif %}
+
+  - type: grid
+    cards:
+      - type: entities
+        title: Work Item Counts
+        entities:
+          - entity: sensor.active_work_items
+            name: Active work items
+          - entity: sensor.assigned_active_work_items
+            name: Assigned active work items
+          - type: custom:template-entity-row
+            name: States
+            state: >-
+              {% set states_map = state_attr('sensor.active_work_items', 'work_items_by_state') or {} %}
+              {% if states_map %}
+                {% for key, value in states_map.items() %}
+                  {{ key }}: {{ value }}{% if not loop.last %}, {% endif %}
+                {% endfor %}
+              {% else %}
+                -
+              {% endif %}
+          - type: custom:template-entity-row
+            name: Types
+            state: >-
+              {% set types_map = state_attr('sensor.active_work_items', 'work_items_by_type') or {} %}
+              {% if types_map %}
+                {% for key, value in types_map.items() %}
+                  {{ key }}: {{ value }}{% if not loop.last %}, {% endif %}
+                {% endfor %}
+              {% else %}
+                -
+              {% endif %}
+
+      - type: markdown
+        title: Assigned Work Items
+        content: >-
+          {% set items = state_attr('sensor.assigned_active_work_items', 'work_items') or [] %}
+          {% if items %}
+          {% for item in items %}
+          - **{{ item.work_item_type or 'Unknown' }} {{ item.work_item_id }}**
+            - {{ item.title or 'Untitled' }}
+            - State: {{ item.state or '-' }}
+          {% endfor %}
+          {% else %}
+          No assigned active work items.
+          {% endif %}
+
+  - type: grid
+    cards:
+      - type: markdown
+        title: Failed Builds
+        content: >-
+          {% set builds = state_attr('sensor.failed_builds', 'failed_builds') or [] %}
+          {% if builds %}
+          {% for build in builds %}
+          - **{{ build.definition_name or 'Unknown pipeline' }}**
+            - Build: {{ build.build_number or '-' }}
+            - Result: {{ build.result or '-' }}
+            - Branch: {{ build.source_branch or '-' }}
+          {% endfor %}
+          {% else %}
+          No failed builds.
+          {% endif %}
+
+      - type: markdown
+        title: Latest Pipeline Builds
+        content: >-
+          {% set builds = state_attr('sensor.pipelines', 'latest_builds') or [] %}
+          {% if builds %}
+          {% for build in builds[:10] %}
+          - **{{ build.definition_name or 'Unknown pipeline' }}**
+            - Build: {{ build.build_number or '-' }}
+            - Status: {{ build.status or '-' }}
+            - Result: {{ build.result or '-' }}
+          {% endfor %}
+          {% else %}
+          No pipeline build data.
+          {% endif %}
+
+  - type: grid
+    cards:
+      - type: entities
+        title: Event Entities
+        show_header_toggle: false
+        entities:
+          - event.new_pull_request_published
+          - event.new_comment_on_authored_pull_requests
+          - event.new_comment_on_reviewed_pull_requests
+          - event.failed_build_on_authored_pull_requests
+          - event.failed_build_on_reviewed_pull_requests
+          - event.authored_pull_request_ready_to_complete
+          - event.reviewed_pull_request_ready_to_complete

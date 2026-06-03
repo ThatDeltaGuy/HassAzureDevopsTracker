@@ -36,6 +36,7 @@ from .const import (
     EVENT_NEW_REVIEWED_PR_COMMENT,
     EVENT_REVIEWED_PR_BUILD_FAILED,
     EVENT_REVIEWED_PR_READY_TO_COMPLETE,
+    EVENT_REVIEWED_PR_REVIEW_RESET,
     HUMAN_COMMENT_TYPE,
     NEW_COMMENT_WINDOW,
     OPTION_ENABLE_BUILDS,
@@ -237,15 +238,18 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 pr.author,
                 current_user_aliases,
             )
-            is_reviewer = any(
-                self._identity_matches(
+            matched_reviewers = [
+                reviewer
+                for reviewer in pr.reviewers
+                if self._identity_matches(
                     reviewer,
                     current_user_aliases,
                 )
-                for reviewer in pr.reviewers
-            )
+            ]
+            is_reviewer = bool(matched_reviewers)
             pr.is_authored_by_current_user = is_author
             pr.is_reviewed_by_current_user = is_reviewer and not is_author
+            pr.current_user_review_vote = matched_reviewers[0].vote if matched_reviewers else None
 
             if self.enable_pr_policies:
                 pr.policies = await self.client.list_policy_evaluations(
@@ -521,6 +525,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Persist seen state and emit transition events."""
         previous_build_failures: dict[str, bool] = self._seen_state.get("pr_build_failed", {})
         previous_ready: dict[str, bool] = self._seen_state.get("pr_ready", {})
+        previous_review_votes: dict[str, int | None] = self._seen_state.get("pr_review_vote", {})
         previous_comment_notifications: dict[str, list[str]] = self._seen_state.get(
             "comment_notifications", {}
         )
@@ -666,8 +671,44 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     },
                 )
 
+            previous_vote = previous_review_votes.get(pr_key)
+            current_vote = pr.current_user_review_vote
+            if (
+                self._initialized
+                and pr.is_reviewed_by_current_user
+                and previous_vote is not None
+                and previous_vote != 0
+                and current_vote == 0
+            ):
+                _LOGGER.debug(
+                    "Emitting review-reset event for repo=%s pr=%s previous_vote=%s current_vote=%s key=%s",
+                    pr.repository_name,
+                    pr.pull_request_id,
+                    previous_vote,
+                    current_vote,
+                    pr_key,
+                )
+                self._dispatch_event(
+                    EVENT_REVIEWED_PR_REVIEW_RESET,
+                    {
+                        "organization": data.organization,
+                        "project_id": data.project.id,
+                        "project_name": data.project.name,
+                        "pull_request_id": pr.pull_request_id,
+                        "pull_request_title": pr.title,
+                        "pull_request_url": pr.url,
+                        "repository_id": pr.repository_id,
+                        "repository_name": pr.repository_name,
+                        "source_ref_name": pr.source_ref_name,
+                        "target_ref_name": pr.target_ref_name,
+                        "previous_vote": previous_vote,
+                        "current_vote": current_vote,
+                    },
+                )
+
             self._seen_state.setdefault("pr_build_failed", {})[pr_key] = pr.build_failed
             self._seen_state.setdefault("pr_ready", {})[pr_key] = pr.ready_to_complete
+            self._seen_state.setdefault("pr_review_vote", {})[pr_key] = current_vote
             self._seen_state.setdefault("comment_notifications", {})[pr_key] = sorted(
                 comment_notifications
             )

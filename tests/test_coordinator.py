@@ -49,6 +49,7 @@ def _pull_request(
     has_new_comment: bool = False,
     build_failed: bool = False,
     ready: bool = False,
+    review_vote: int | None = None,
     latest_new_comment: CommentInfo | None = None,
     new_comments: list[CommentInfo] | None = None,
     new_count: int = 0,
@@ -68,6 +69,7 @@ def _pull_request(
         author=IdentityInfo(id="author-1", display_name="Author", unique_name="author@example.com"),
         is_authored_by_current_user=True,
         is_reviewed_by_current_user=False,
+        current_user_review_vote=review_vote,
         latest_new_comment=latest_new_comment,
         new_comments=new_comments or ([] if latest_new_comment is None else [latest_new_comment]),
         has_new_comment=has_new_comment,
@@ -476,6 +478,58 @@ def test_process_transitions_emits_later_new_comment_after_prior_notifications_e
     assert len(comment_events) == 1
     assert comment_events[0]["text"] == "Newly detected"
     assert coordinator._seen_state["comment_notifications"]["repo-1:77"] == ["111:11", "112:12"]
+
+
+def test_process_transitions_emits_review_reset_event_when_vote_changes_to_zero() -> None:
+    """A reviewed PR should emit once when the current user's review vote resets to zero."""
+    pull_request = _pull_request(90, review_vote=0)
+    pull_request.is_authored_by_current_user = False
+    pull_request.is_reviewed_by_current_user = True
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"pr_review_vote": {"repo-1:90": 10}}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events[0][0] == "azure_devops_review_reset_on_reviewed_pull_requests"
+    assert events[0][1]["pull_request_id"] == 90
+    assert events[0][1]["previous_vote"] == 10
+    assert events[0][1]["current_vote"] == 0
+    assert coordinator._seen_state["pr_review_vote"]["repo-1:90"] == 0
+
+
+def test_process_transitions_does_not_emit_review_reset_for_zero_to_zero() -> None:
+    """A PR already at zero vote should not emit repeated reset events."""
+    pull_request = _pull_request(91, review_vote=0)
+    pull_request.is_authored_by_current_user = False
+    pull_request.is_reviewed_by_current_user = True
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"pr_review_vote": {"repo-1:91": 0}}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events == []
 
 
 def test_process_transitions_emits_new_pull_request_published_event() -> None:

@@ -14,6 +14,7 @@ from .const import (
     EVENT_NEW_REVIEWED_PR_COMMENT,
     EVENT_REVIEWED_PR_BUILD_FAILED,
     EVENT_REVIEWED_PR_READY_TO_COMPLETE,
+    EVENT_REVIEWED_PR_REVIEW_RESET,
 )
 from .coordinator import AzureDevOpsTrackerConfigEntry
 from .entity import AzureDevOpsTrackerEntity
@@ -35,6 +36,7 @@ async def async_setup_entry(
             AzureDevOpsTrackerProjectEvent(coordinator, EVENT_REVIEWED_PR_BUILD_FAILED, "Failed build on reviewed pull requests", "mdi:alert-circle-outline"),
             AzureDevOpsTrackerProjectEvent(coordinator, EVENT_AUTHORED_PR_READY_TO_COMPLETE, "Authored pull request ready to complete", "mdi:check-circle-outline"),
             AzureDevOpsTrackerProjectEvent(coordinator, EVENT_REVIEWED_PR_READY_TO_COMPLETE, "Reviewed pull request ready to complete", "mdi:check-circle-outline"),
+            AzureDevOpsTrackerProjectEvent(coordinator, EVENT_REVIEWED_PR_REVIEW_RESET, "Review reset on reviewed pull requests", "mdi:account-remove-outline"),
         ]
     )
 

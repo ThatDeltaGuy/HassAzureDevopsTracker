@@ -13,6 +13,7 @@ class IdentityInfo:
     id: str | None
     display_name: str | None
     unique_name: str | None
+    vote: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return the identity as a serializable dict."""
@@ -20,6 +21,7 @@ class IdentityInfo:
             "id": self.id,
             "display_name": self.display_name,
             "unique_name": self.unique_name,
+            "vote": self.vote,
         }
 
 
@@ -107,6 +109,7 @@ class PullRequestInfo:
     author: IdentityInfo
     is_authored_by_current_user: bool = False
     is_reviewed_by_current_user: bool = False
+    current_user_review_vote: int | None = None
     reviewers: list[IdentityInfo] = field(default_factory=list)
     policies: list[PolicyInfo] = field(default_factory=list)
     latest_comment: CommentInfo | None = None
@@ -138,11 +141,13 @@ class PullRequestInfo:
             "author_unique_name": self.author.unique_name,
             "is_authored_by_current_user": self.is_authored_by_current_user,
             "is_reviewed_by_current_user": self.is_reviewed_by_current_user,
+            "current_user_review_vote": self.current_user_review_vote,
             "reviewers": [
                 {
                     "id": reviewer.id,
                     "display_name": reviewer.display_name,
                     "unique_name": reviewer.unique_name,
+                    "vote": reviewer.vote,
                 }
                 for reviewer in self.reviewers
             ],
