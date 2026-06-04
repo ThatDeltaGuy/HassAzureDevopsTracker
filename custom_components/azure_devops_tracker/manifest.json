@@ -4,9 +4,9 @@
   "codeowners": ["@ThatDeltaGuy"],
   "config_flow": true,
   "documentation": "https://github.com/ThatDeltaGuy/Azure-Devops-Integration",
-  "issue_tracker": "https://github.com/ThatDeltaGuy/Azure-Devops-Integration/issues",
   "integration_type": "service",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ThatDeltaGuy/Azure-Devops-Integration/issues",
   "loggers": ["custom_components.azure_devops_tracker"],
   "version": "0.2.0"
 }
