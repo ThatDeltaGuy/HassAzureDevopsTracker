@@ -1,13 +1,12 @@
 {
   "domain": "azure_devops_tracker",
   "name": "Azure DevOps Tracker",
-  "codeowners": ["@alexlund"],
+  "codeowners": ["@ThatDeltaGuy"],
   "config_flow": true,
-  "documentation": "https://github.com/alexlund/Azure-Devops-Integration",
-  "issue_tracker": "https://github.com/alexlund/Azure-Devops-Integration/issues",
+  "documentation": "https://github.com/ThatDeltaGuy/Azure-Devops-Integration",
+  "issue_tracker": "https://github.com/ThatDeltaGuy/Azure-Devops-Integration/issues",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "homeassistant": "2025.1.0",
   "loggers": ["custom_components.azure_devops_tracker"],
   "version": "0.2.0"
 }
