@@ -8,5 +8,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/ThatDeltaGuy/Azure-Devops-Integration/issues",
   "loggers": ["custom_components.azure_devops_tracker"],
-  "version": "0.3.0"
+  "version": "0.3.1"
 }

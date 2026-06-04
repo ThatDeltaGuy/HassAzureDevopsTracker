@@ -85,11 +85,7 @@ jobs:
           rm -rf "$staging_dir"
           mkdir -p "$staging_dir"
 
-          cp -R custom_components "$staging_dir/"
-          cp README.md LICENSE.md hacs.json "$staging_dir/"
-          if [ -d brand ]; then
-            cp -R brand "$staging_dir/"
-          fi
+          cp -R custom_components/azure_devops_tracker/. "$staging_dir/"
 
           mkdir -p dist
           rm -f "dist/$asset_name"

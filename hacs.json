@@ -1,7 +1,7 @@
 {
   "name": "Azure DevOps Tracker",
   "homeassistant": "2025.1.0",
-  "content_in_root": false,
+  "content_in_root": true,
   "hide_default_branch": true,
   "render_readme": true,
   "zip_release": true,
