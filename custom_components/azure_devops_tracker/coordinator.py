@@ -319,7 +319,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         if pull_requests and not relevant_prs:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Azure DevOps returned %s active pull requests for project '%s' but none matched the resolved user identity. Current user=%s aliases=%s sample_prs=%s",
                 len(pull_requests),
                 project.name,
