@@ -87,6 +87,19 @@ def _pull_request(
     )
 
 
+def _reviewer(
+    reviewer_id: str,
+    name: str,
+    vote: int | None,
+) -> IdentityInfo:
+    return IdentityInfo(
+        id=reviewer_id,
+        display_name=name,
+        unique_name=f"{name}@example.com",
+        vote=vote,
+    )
+
+
 def test_classify_comments_ignores_deleted_system_and_own_comments() -> None:
     """Only unseen human comments from other users should count."""
     coordinator = object.__new__(AzureDevOpsCoordinator)
@@ -506,6 +519,136 @@ def test_process_transitions_emits_review_reset_event_when_vote_changes_to_zero(
     assert events[0][1]["previous_vote"] == 10
     assert events[0][1]["current_vote"] == 0
     assert coordinator._seen_state["pr_review_vote"]["repo-1:90"] == 0
+
+
+def test_process_transitions_emits_authored_pr_approved_event_when_reviewer_votes_approved() -> None:
+    """An authored PR should emit once when a reviewer changes to vote 10."""
+    pull_request = _pull_request(92)
+    pull_request.reviewers = [_reviewer("reviewer-1", "Reviewer", 10)]
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"pr_reviewer_votes": {"repo-1:92": {"reviewer1": 0}}}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events[0][0] == "azure_devops_authored_pull_request_approved"
+    assert events[0][1]["pull_request_id"] == 92
+    assert events[0][1]["reviewer_id"] == "reviewer-1"
+    assert events[0][1]["previous_vote"] == 0
+    assert events[0][1]["current_vote"] == 10
+    assert coordinator._seen_state["pr_reviewer_votes"]["repo-1:92"] == {"reviewer1": 10}
+
+
+def test_process_transitions_does_not_emit_authored_pr_approved_event_on_first_load() -> None:
+    """Existing approvals should be treated as seen during first initialization."""
+    pull_request = _pull_request(93)
+    pull_request.reviewers = [_reviewer("reviewer-1", "Reviewer", 10)]
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {}
+    coordinator._initialized = False
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events == []
+    assert coordinator._seen_state["pr_reviewer_votes"]["repo-1:93"] == {"reviewer1": 10}
+
+
+def test_process_transitions_does_not_reemit_authored_pr_approved_event_for_stable_approval() -> None:
+    """A reviewer already at vote 10 should not keep re-emitting approval events."""
+    pull_request = _pull_request(94)
+    pull_request.reviewers = [_reviewer("reviewer-1", "Reviewer", 10)]
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"pr_reviewer_votes": {"repo-1:94": {"reviewer1": 10}}}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events == []
+
+
+def test_process_transitions_emits_one_authored_pr_approved_event_per_newly_approved_reviewer() -> None:
+    """Distinct reviewers should emit separate approval events when each transitions to vote 10."""
+    pull_request = _pull_request(95)
+    pull_request.reviewers = [
+        _reviewer("reviewer-1", "Reviewer One", 10),
+        _reviewer("reviewer-2", "Reviewer Two", 10),
+    ]
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"pr_reviewer_votes": {"repo-1:95": {"reviewer1": 0, "reviewer2": 5}}}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert [event_type for event_type, _payload in events] == [
+        "azure_devops_authored_pull_request_approved",
+        "azure_devops_authored_pull_request_approved",
+    ]
+    assert [payload["reviewer_id"] for _event_type, payload in events] == ["reviewer-1", "reviewer-2"]
+
+
+def test_process_transitions_does_not_emit_authored_pr_approved_event_for_reviewed_prs() -> None:
+    """The authored approval event should not fire for PRs the current user is only reviewing."""
+    pull_request = _pull_request(96)
+    pull_request.is_authored_by_current_user = False
+    pull_request.is_reviewed_by_current_user = True
+    pull_request.reviewers = [_reviewer("reviewer-1", "Reviewer", 10)]
+    data = CoordinatorData(
+        organization="org",
+        project=ProjectInfo(id="project-1", name="Project", description=None, url=None, state=None, visibility=None),
+        current_user=None,
+        pull_requests=[pull_request],
+    )
+
+    events: list[tuple[str, dict]] = []
+    coordinator = object.__new__(AzureDevOpsCoordinator)
+    coordinator._seen_state = {"pr_reviewer_votes": {"repo-1:96": {"reviewer1": 0}}}
+    coordinator._initialized = True
+    coordinator.store = _FakeStore()
+    coordinator._dispatch_event = lambda event_type, payload: events.append((event_type, payload))
+
+    asyncio.run(AzureDevOpsCoordinator._process_transitions(coordinator, data))
+
+    assert events == []
 
 
 def test_process_transitions_does_not_emit_review_reset_for_zero_to_zero() -> None:

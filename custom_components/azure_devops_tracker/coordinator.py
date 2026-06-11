@@ -29,6 +29,7 @@ from .const import (
     DEFAULT_ENABLE_WORK_ITEMS,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
+    EVENT_AUTHORED_PR_APPROVED,
     EVENT_AUTHORED_PR_BUILD_FAILED,
     EVENT_AUTHORED_PR_READY_TO_COMPLETE,
     EVENT_NEW_AUTHORED_PR_COMMENT,
@@ -526,6 +527,9 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         previous_build_failures: dict[str, bool] = self._seen_state.get("pr_build_failed", {})
         previous_ready: dict[str, bool] = self._seen_state.get("pr_ready", {})
         previous_review_votes: dict[str, int | None] = self._seen_state.get("pr_review_vote", {})
+        previous_reviewer_votes: dict[str, dict[str, int | None]] = self._seen_state.get(
+            "pr_reviewer_votes", {}
+        )
         previous_comment_notifications: dict[str, list[str]] = self._seen_state.get(
             "comment_notifications", {}
         )
@@ -566,6 +570,12 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         for pr in data.pull_requests:
             pr_key = self._pull_request_tracking_key(pr)
+            previous_pr_reviewer_votes = previous_reviewer_votes.get(pr_key, {})
+            current_pr_reviewer_votes = {
+                reviewer_key: reviewer.vote
+                for reviewer in pr.reviewers
+                if (reviewer_key := self._reviewer_tracking_key(reviewer)) is not None
+            }
             comment_notifications = {
                 str(comment_key)
                 for comment_key in previous_comment_notifications.get(pr_key, [])
@@ -644,6 +654,47 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     },
                 )
 
+            if self._initialized and pr.is_authored_by_current_user:
+                for reviewer in pr.reviewers:
+                    reviewer_key = self._reviewer_tracking_key(reviewer)
+                    if reviewer_key is None:
+                        continue
+
+                    previous_vote = previous_pr_reviewer_votes.get(reviewer_key)
+                    current_vote = reviewer.vote
+                    if current_vote != 10 or previous_vote == 10:
+                        continue
+
+                    _LOGGER.debug(
+                        "Emitting authored-pr-approved event for repo=%s pr=%s reviewer=%s previous_vote=%s current_vote=%s key=%s",
+                        pr.repository_name,
+                        pr.pull_request_id,
+                        reviewer_key,
+                        previous_vote,
+                        current_vote,
+                        pr_key,
+                    )
+                    self._dispatch_event(
+                        EVENT_AUTHORED_PR_APPROVED,
+                        {
+                            "organization": data.organization,
+                            "project_id": data.project.id,
+                            "project_name": data.project.name,
+                            "pull_request_id": pr.pull_request_id,
+                            "pull_request_title": pr.title,
+                            "pull_request_url": pr.url,
+                            "repository_id": pr.repository_id,
+                            "repository_name": pr.repository_name,
+                            "source_ref_name": pr.source_ref_name,
+                            "target_ref_name": pr.target_ref_name,
+                            "reviewer_id": reviewer.id,
+                            "reviewer_name": reviewer.display_name,
+                            "reviewer_unique_name": reviewer.unique_name,
+                            "previous_vote": previous_vote,
+                            "current_vote": current_vote,
+                        },
+                    )
+
             if self._initialized and not previous_ready.get(pr_key, False) and pr.ready_to_complete:
                 event_type = (
                     EVENT_AUTHORED_PR_READY_TO_COMPLETE
@@ -709,6 +760,7 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._seen_state.setdefault("pr_build_failed", {})[pr_key] = pr.build_failed
             self._seen_state.setdefault("pr_ready", {})[pr_key] = pr.ready_to_complete
             self._seen_state.setdefault("pr_review_vote", {})[pr_key] = current_vote
+            self._seen_state.setdefault("pr_reviewer_votes", {})[pr_key] = current_pr_reviewer_votes
             self._seen_state.setdefault("comment_notifications", {})[pr_key] = sorted(
                 comment_notifications
             )
@@ -769,6 +821,15 @@ class AzureDevOpsCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if not current_user_aliases:
             return False
         return bool(cls._identity_aliases(identity) & current_user_aliases)
+
+    @classmethod
+    def _reviewer_tracking_key(cls, reviewer: IdentityInfo) -> str | None:
+        """Return a stable per-reviewer key for transition tracking."""
+        for value in (reviewer.id, reviewer.unique_name, reviewer.display_name):
+            normalized = cls._normalize_identity_value(value)
+            if normalized:
+                return normalized
+        return None
 
     @property
     def pull_requests_with_new_comments(self) -> list[PullRequestInfo]:

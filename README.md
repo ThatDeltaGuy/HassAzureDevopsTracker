@@ -124,6 +124,7 @@ The integration also emits Home Assistant events you can use in automations:
 - `azure_devops_new_comment_on_reviewed_pull_requests`: a new human comment was detected on a PR you are reviewing.
 - `azure_devops_failed_build_on_authored_pull_requests`: one of your PRs has moved into a failed build state.
 - `azure_devops_failed_build_on_reviewed_pull_requests`: a PR you are reviewing has moved into a failed build state.
+- `azure_devops_authored_pull_request_approved`: one of your PRs received a new `Approved` review vote.
 - `azure_devops_authored_pull_request_ready_to_complete`: one of your PRs has become ready to complete.
 - `azure_devops_reviewed_pull_request_ready_to_complete`: a PR you are reviewing has become ready to complete.
 - `azure_devops_review_reset_on_reviewed_pull_requests`: your review vote on someone else’s PR changed back to `0`.
@@ -248,6 +249,22 @@ All PR-related events include enough metadata to identify the project, repositor
   - `pull_request_url`
   - `repository_name`
   - `policies`
+- `azure_devops_authored_pull_request_approved` includes:
+  - `organization`
+  - `project_id`
+  - `project_name`
+  - `pull_request_id`
+  - `pull_request_title`
+  - `pull_request_url`
+  - `repository_id`
+  - `repository_name`
+  - `source_ref_name`
+  - `target_ref_name`
+  - `reviewer_id`
+  - `reviewer_name`
+  - `reviewer_unique_name`
+  - `previous_vote`
+  - `current_vote`
 - `azure_devops_authored_pull_request_ready_to_complete` and `azure_devops_reviewed_pull_request_ready_to_complete` include:
   - `organization`
   - `project_name`
@@ -302,6 +319,7 @@ Events:
 - event: new comment on reviewed pull requests
 - event: failed build on authored pull requests
 - event: failed build on reviewed pull requests
+- event: authored pull request approved
 - event: authored pull request ready to complete
 - event: reviewed pull request ready to complete
 - event: review reset on reviewed pull requests
@@ -346,7 +364,7 @@ Current v0.3 scaffold includes:
 - reconfigurable feature toggles
 - aggregate sensors for authored/reviewed PRs, project builds, pipelines, and work items
 - aggregate binary sensors for authored/reviewed PR attention states
-- Home Assistant events for PR publication, comments, build failures, ready-to-complete transitions, and review resets
+- Home Assistant events for PR publication, comments, build failures, approvals, ready-to-complete transitions, and review resets
 
 ## Repository Layout
 
