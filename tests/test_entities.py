@@ -327,3 +327,23 @@ def test_reviewed_pr_published_event_entity_forwards_matching_payloads() -> None
         listener("azure_devops_new_reviewed_pull_request_published_with_passed_build", payload)
 
     assert entity._last_event == ("azure_devops_new_reviewed_pull_request_published_with_passed_build", payload)
+
+
+def test_authored_pr_approved_event_entity_forwards_matching_payloads() -> None:
+    """Authored PR approved event entity should capture its matching payload only."""
+    pull_request = _pull_request()
+    coordinator = _DynamicCoordinator([pull_request])
+    entity = AzureDevOpsTrackerProjectEvent(
+        coordinator,
+        "azure_devops_authored_pull_request_approved",
+        "Authored pull request approved",
+        "mdi:thumb-up-outline",
+    )
+
+    asyncio.run(entity.async_added_to_hass())
+
+    payload = {"pull_request_id": 23, "reviewer_id": "reviewer-1"}
+    for listener in coordinator._event_listeners:
+        listener("azure_devops_authored_pull_request_approved", payload)
+
+    assert entity._last_event == ("azure_devops_authored_pull_request_approved", payload)
