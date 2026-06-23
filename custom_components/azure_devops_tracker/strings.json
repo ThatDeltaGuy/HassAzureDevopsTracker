@@ -2,7 +2,8 @@
   "title": "Azure DevOps Tracker",
   "config": {
     "abort": {
-      "already_configured": "This Azure DevOps project is already configured."
+      "already_configured": "This Azure DevOps project is already configured.",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     },
     "error": {
       "cannot_connect": "Failed to connect to Azure DevOps.",
@@ -25,6 +26,20 @@
         "description": "Choose an existing PAT for this organization or enter a new organization-scoped PAT.",
         "data": {
           "reuse_personal_access_token": "Reuse Credentials",
+          "personal_access_token": "Personal access token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "Azure DevOps Tracker needs a new personal access token for this organization.",
+        "data": {
+          "personal_access_token": "Personal access token"
+        }
+      },
+      "reconfigure": {
+        "title": "Update personal access token",
+        "description": "Enter a replacement personal access token for this Azure DevOps project.",
+        "data": {
           "personal_access_token": "Personal access token"
         }
       },

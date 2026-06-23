@@ -43,6 +43,11 @@ class _FakeClient:
         ]
 
 
+class _InvalidAuthClient(_FakeClient):
+    async def validate_organization(self, organization: str) -> None:
+        raise config_flow_module.AzureDevOpsAuthError
+
+
 def test_user_step_rejects_blank_credentials() -> None:
     """Blank organization should not advance the flow."""
     flow = AzureDevOpsTrackerConfigFlow()
@@ -519,3 +524,110 @@ def test_clearing_organization_context_clears_reuse_and_pat_input() -> None:
     assert flow._organization_input == ""
     assert flow._selected_reuse_entry == ""
     assert flow._pat_input == ""
+
+
+def test_reauth_confirm_updates_existing_entry(monkeypatch) -> None:
+    """Reauth should update the existing entry PAT instead of creating a new entry."""
+    monkeypatch.setattr(config_flow_module, "AzureDevOpsClient", _FakeClient)
+
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        unique_id="org-one_project-1",
+        data={
+            CONF_ORGANIZATION: "org-one",
+            CONF_PROJECT_ID: "project-1",
+            CONF_PAT: "expired-pat",
+        },
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._test_reauth_entry = existing_entry
+
+    result = asyncio.run(flow.async_step_reauth_confirm({CONF_PAT: "fresh-pat"}))
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "reauth_successful"
+    assert result["entry"] is existing_entry
+    assert result["data_updates"] == {CONF_PAT: "fresh-pat"}
+
+
+def test_reauth_confirm_rejects_invalid_pat(monkeypatch) -> None:
+    """Reauth should surface invalid_auth when the replacement PAT fails validation."""
+    monkeypatch.setattr(config_flow_module, "AzureDevOpsClient", _InvalidAuthClient)
+
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        unique_id="org-one_project-1",
+        data={
+            CONF_ORGANIZATION: "org-one",
+            CONF_PROJECT_ID: "project-1",
+            CONF_PAT: "expired-pat",
+        },
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._test_reauth_entry = existing_entry
+
+    result = asyncio.run(flow.async_step_reauth_confirm({CONF_PAT: "bad-pat"}))
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+def test_reconfigure_updates_existing_entry_pat(monkeypatch) -> None:
+    """Reconfigure should update the targeted entry PAT in place."""
+    monkeypatch.setattr(config_flow_module, "AzureDevOpsClient", _FakeClient)
+
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        unique_id="org-one_project-1",
+        data={
+            CONF_ORGANIZATION: "org-one",
+            CONF_PROJECT_ID: "project-1",
+            CONF_PAT: "old-pat",
+        },
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._test_reconfigure_entry = existing_entry
+
+    result = asyncio.run(flow.async_step_reconfigure({CONF_PAT: "rotated-pat"}))
+
+    assert result["type"] == "abort"
+    assert result["entry"] is existing_entry
+    assert result["data_updates"] == {CONF_PAT: "rotated-pat"}
+
+
+def test_reconfigure_rejects_blank_pat() -> None:
+    """Reconfigure should require a replacement PAT."""
+    existing_entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="org-one/Project One",
+        unique_id="org-one_project-1",
+        data={
+            CONF_ORGANIZATION: "org-one",
+            CONF_PROJECT_ID: "project-1",
+            CONF_PAT: "old-pat",
+        },
+    )
+    flow = AzureDevOpsTrackerConfigFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [existing_entry])
+    )
+    flow._test_reconfigure_entry = existing_entry
+
+    result = asyncio.run(flow.async_step_reconfigure({CONF_PAT: "   "}))
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "required_field"}

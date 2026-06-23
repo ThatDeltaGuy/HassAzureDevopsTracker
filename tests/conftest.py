@@ -35,11 +35,29 @@ def _install_homeassistant_stubs() -> None:
         def async_create_entry(self, *, title, data, options=None):
             return {"type": "create_entry", "title": title, "data": data, "options": options or {}}
 
+        def async_update_reload_and_abort(self, entry, *, data_updates=None, reload_even_if_entry_is_unchanged=True):
+            return {
+                "type": "abort",
+                "reason": "reauth_successful",
+                "entry": entry,
+                "data_updates": data_updates or {},
+                "reload_even_if_entry_is_unchanged": reload_even_if_entry_is_unchanged,
+            }
+
         async def async_set_unique_id(self, unique_id):
             self._test_unique_id = unique_id
 
         def _abort_if_unique_id_configured(self):
             return None
+
+        def _abort_if_unique_id_mismatch(self):
+            return None
+
+        def _get_reauth_entry(self):
+            return self._test_reauth_entry
+
+        def _get_reconfigure_entry(self):
+            return self._test_reconfigure_entry
 
     class OptionsFlow:
         """Minimal OptionsFlow stub."""
