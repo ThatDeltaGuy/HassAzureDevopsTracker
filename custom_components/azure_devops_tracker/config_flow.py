@@ -179,6 +179,40 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                 return project
         return None
 
+    async def _async_validate_pat(
+        self,
+        organization: str,
+        pat: str,
+        *,
+        required_project_id: str | None = None,
+    ) -> str | None:
+        """Validate a PAT and optionally confirm the configured project is visible."""
+        client = AzureDevOpsClient(async_get_clientsession(self.hass), pat)
+        try:
+            await client.validate_organization(organization)
+            self._projects = await client.list_projects(organization)
+        except AzureDevOpsAuthError:
+            return "invalid_auth"
+        except Exception:
+            return "cannot_connect"
+
+        if not self._projects:
+            return "no_projects"
+
+        if required_project_id and self._get_project(required_project_id) is None:
+            return "project_not_found"
+
+        return None
+
+    async def _async_update_existing_entry_pat(self, entry, pat: str):
+        """Update the targeted config entry with a replacement PAT."""
+        await self.async_set_unique_id(f"{entry.data[CONF_ORGANIZATION]}_{entry.data[CONF_PROJECT_ID]}")
+        self._abort_if_unique_id_mismatch()
+        return self.async_update_reload_and_abort(
+            entry,
+            data_updates={CONF_PAT: pat},
+        )
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Step 1: organization selection, or full setup when no entries exist."""
         errors: dict[str, str] = {}
@@ -216,17 +250,9 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                         errors=errors,
                     )
 
-                client = AzureDevOpsClient(async_get_clientsession(self.hass), self._pat)
-                try:
-                    await client.validate_organization(self._organization)
-                    self._projects = await client.list_projects(self._organization)
-                except AzureDevOpsAuthError:
-                    errors["base"] = "invalid_auth"
-                except Exception:
-                    errors["base"] = "cannot_connect"
-
-                if not errors and not self._projects:
-                    errors["base"] = "no_projects"
+                error = await self._async_validate_pat(self._organization, self._pat)
+                if error:
+                    errors["base"] = error
 
                 if not errors:
                     return await self.async_step_project()
@@ -272,17 +298,9 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors=errors,
                 )
 
-            client = AzureDevOpsClient(async_get_clientsession(self.hass), self._pat)
-            try:
-                await client.validate_organization(self._organization)
-                self._projects = await client.list_projects(self._organization)
-            except AzureDevOpsAuthError:
-                errors["base"] = "invalid_auth"
-            except Exception:
-                errors["base"] = "cannot_connect"
-
-            if not errors and not self._projects:
-                errors["base"] = "no_projects"
+            error = await self._async_validate_pat(self._organization, self._pat)
+            if error:
+                errors["base"] = error
 
             if not errors:
                 return await self.async_step_project()
@@ -352,6 +370,79 @@ class AzureDevOpsTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
                             mode="box",
                         )
                     ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]):
+        """Start reauthentication for an existing config entry."""
+        self._organization = entry_data[CONF_ORGANIZATION]
+        self._pat = None
+        self._pat_input = ""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
+        """Prompt for a replacement PAT after an auth failure."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            entered_pat = user_input.get(CONF_PAT, "").strip()
+            self._pat_input = entered_pat
+            if not entered_pat:
+                errors["base"] = "required_field"
+            else:
+                error = await self._async_validate_pat(
+                    entry.data[CONF_ORGANIZATION],
+                    entered_pat,
+                    required_project_id=entry.data[CONF_PROJECT_ID],
+                )
+                if error:
+                    errors["base"] = error
+                else:
+                    return await self._async_update_existing_entry_pat(entry, entered_pat)
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PAT, default=self._pat_input): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
+        """Allow manual PAT rotation for an existing config entry."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            entered_pat = user_input.get(CONF_PAT, "").strip()
+            self._pat_input = entered_pat
+            if not entered_pat:
+                errors["base"] = "required_field"
+            else:
+                error = await self._async_validate_pat(
+                    entry.data[CONF_ORGANIZATION],
+                    entered_pat,
+                    required_project_id=entry.data[CONF_PROJECT_ID],
+                )
+                if error:
+                    errors["base"] = error
+                else:
+                    return await self._async_update_existing_entry_pat(entry, entered_pat)
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PAT, default=self._pat_input): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    )
                 }
             ),
             errors=errors,
